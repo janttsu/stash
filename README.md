@@ -3,6 +3,13 @@
 A self-hosted bookmark manager you can use in the browser, from other computers through an API, and in
 plain language with a language model running on your own machine.
 
+![The Dashboard: tabs, coloured categories in columns, bookmarks with site icons](docs/screenshots/dashboard.png)
+
+![My Bookmarks: every bookmark with its tags, notes and place, the tag list on the left](docs/screenshots/bookmarks.png)
+
+<sub>Screenshots of a demo account (`node tools/screenshots.mjs` makes them again). A dark theme follows the
+device setting.</sub>
+
 **Everything stays in your hands.** Stash runs on your own server, and your bookmarks, browsing history and
 change history live in your own database. The language model runs on your own computer (Ollama), so no cloud
 service sees what you save, what you read or what you ask. That is the big advantage of hosting it yourself:
@@ -128,6 +135,7 @@ python3 ~/stash-history-sync.py --schedule    # sends every 6 hours (launchd / c
 client/.venv/bin/python -m pytest -q client/tests   # stashai: search, agent, model connection, web, TUI
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
 node tools/check-i18n.mjs          # missing Finnish translations
+node tools/screenshots.mjs         # the README screenshots, from a demo instance on port 8014
 ```
 
 ## Security in brief
