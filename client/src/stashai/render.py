@@ -21,6 +21,8 @@ def diff_line(e: dict) -> str:
         parts.append("tags " + tag_change(*e["tags"]))
     if "location" in e:
         parts.append(f"{e['location'][0]} → {e['location'][1]}")
+    if "position" in e:
+        parts.append(f"place {e['position'][0]} → {e['position'][1]}")
     for field in ("title", "url", "notes"):
         if field in e:
             parts.append(f"{field}: {str(e[field][0])[:40]!r} → {str(e[field][1])[:60]!r}")
@@ -40,8 +42,13 @@ def plan_text(summary: str, preview: dict, *, limit: int | None = None) -> list[
             head.append(f"  skipped, already bookmarked: {s['url']}")
         else:
             head.append(f"  skipped: {s['count']} bookmarks not found")
-    entries = sorted(preview["diff"], key=lambda e: ({"deleted": 0, "updated": 1, "created": 2}[e["change"]], e["id"]))
-    lines = [diff_line(e) for e in entries]
+    if preview.get("categories"):
+        head[-1] += f", {len(preview['categories'])} categories reordered"
+    entries = sorted(preview["diff"], key=lambda e: ({"deleted": 0, "updated": 1, "created": 2}[e["change"]],
+                                                     e.get("position", [0, 0])[1], e["id"]))
+    lines = [f"ORDER   {c['tab']} / {c['category']}: column {c['column']}, place {c['position'][0]} → {c['position'][1]}"
+             for c in preview.get("categories", [])]
+    lines += [diff_line(e) for e in entries]
     if limit is not None and len(lines) > limit:
         lines = lines[:limit] + [f"… and {len(lines) - limit} more"]
     return head + [""] + lines

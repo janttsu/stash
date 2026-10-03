@@ -25,6 +25,7 @@ class Bookmark:
     category: str
     category_id: int | None
     created_at: int
+    position: int = 0
     text: str = ""
 
     @property
@@ -69,6 +70,8 @@ class Store:
         self.bookmarks: dict[int, Bookmark] = {}
         self.tabs: list[dict] = []
         self.tags: list[tuple[str, int]] = []
+        self.usage: dict[int, dict] = {}         # bookmark id -> visit counts from the browsing history
+        self.history_sources: list[dict] = []
         self.sets: dict[str, NamedSet] = {}
         self._next = 1
         self.loaded_at = 0.0
@@ -81,12 +84,28 @@ class Store:
             bm = Bookmark(id=b["id"], url=b["url"], title=b["title"], notes=b.get("notes") or "",
                           host=b.get("host") or "", tags=list(b.get("tags") or []), tab=b.get("tab") or "",
                           category=b.get("category") or "", category_id=b.get("category_id"),
-                          created_at=b.get("created_at") or 0)
+                          created_at=b.get("created_at") or 0, position=b.get("position") or 0)
             bm.text = "\n".join((bm.title, bm.url, bm.notes, " ".join(bm.tags), bm.tab, bm.category)).casefold()
             self.bookmarks[bm.id] = bm
         self.tabs = snap.get("tabs", [])
         self.tags = [(t, n) for t, n in snap.get("tags", [])]
         self.loaded_at = time.time()
+
+    def load_usage(self, data: dict) -> None:
+        self.usage = {int(k): v for k, v in (data.get("usage") or {}).items()}
+        self.history_sources = data.get("sources") or []
+
+    def use(self, i: int) -> tuple[int, int, int]:
+        """Sort key for "most used": visits in 90 days, in a year, in all."""
+        u = self.usage.get(i) or {}
+        return u.get("visits_90d", 0), u.get("visits_365d", 0), u.get("visits", 0)
+
+    def use_text(self, i: int) -> str:
+        u = self.usage.get(i)
+        if not u:
+            return "visits: none" if self.history_sources else ""
+        last = time.strftime("%Y-%m-%d", time.localtime(u["last_visit"])) if u.get("last_visit") else "-"
+        return f"visits 30d {u['visits_30d']}, 90d {u['visits_90d']}, all {u['visits']}, last {last}"
 
     # --- sets ------------------------------------------------------------------
 
@@ -110,12 +129,13 @@ class Store:
 
     def search(self, *, text=None, match: str = "any", regex: str = "", host=None, tags_any=None, tags_all=None,
                tags_none=None, untagged: bool = False, tab: str = "", category: str = "", where: str = "",
-               in_set: str = "", not_in_set: str = "", ids=None, exclude_ids=None, added_after: str = "", added_before: str = "",
+               in_set: str = "", not_in_set: str = "", ids=None, exclude_ids=None, used_min: int = 0,
+               unused_days: int = 0, sort: str = "", added_after: str = "", added_before: str = "",
                **unknown) -> list[int]:
         if unknown:
             raise ValueError(f"unknown search fields: {', '.join(unknown)} (use text, match, regex, host, tags_any, "
                              "tags_all, tags_none, untagged, tab, category, where, in_set, not_in_set, ids, exclude_ids, "
-                             "added_after, added_before)")
+                             "used_min, unused_days, sort, added_after, added_before)")
         as_list = lambda v: [v] if isinstance(v, str) else list(v or [])  # noqa: E731
         terms = [t.casefold().strip() for t in as_list(text) if str(t).strip()]
         patterns = []
@@ -158,7 +178,17 @@ class Store:
                 continue
             if after and b.created_at < after or before and b.created_at >= before:
                 continue
+            if used_min and self.use(i)[0] < int(used_min):
+                continue
+            if unused_days:
+                last = (self.usage.get(i) or {}).get("last_visit") or 0
+                if last > time.time() - int(unused_days) * 86400:
+                    continue
             out.append(i)
+        if sort == "use":
+            out.sort(key=self.use, reverse=True)
+        elif sort == "position":
+            out.sort(key=lambda i: (self.bookmarks[i].where, self.bookmarks[i].position))
         return out
 
     # --- text for the model and the screen ------------------------------------------
@@ -168,6 +198,8 @@ class Store:
         parts = [f"#{b.id} {b.title[:100]}", short_url(b.url), "tags: " + (", ".join(b.tags) or "-"), b.where]
         if notes and b.notes:
             parts.append("notes: " + " ".join(b.notes.split())[:100])
+        if self.history_sources:
+            parts.append(self.use_text(i))
         return " | ".join(parts)
 
     def describe(self, ids: list[int], *, sample: int = 15, whole: int = 60, name: str = "") -> str:
@@ -183,6 +215,9 @@ class Store:
                "tags: " + ", ".join(f"{t} {n}" for t, n in tags.most_common(12)) + (f"; untagged {untagged}" if untagged else ""),
                "sites: " + ", ".join(f"{h} {n}" for h, n in hosts.most_common(8)),
                "places: " + ", ".join(f"{p} {n}" for p, n in places.most_common(6))]
+        if self.history_sources:
+            used = sum(1 for i in ids if self.use(i)[0])
+            out.append(f"used in the last 90 days: {used} of {len(ids)}")
         shown = len(ids) if len(ids) <= whole else sample
         out += [self.line(i) for i in ids[:shown]]
         if len(ids) > shown:
@@ -197,6 +232,11 @@ class Store:
                  f"TAGS ({len(self.tags)}, with counts): " + ", ".join(f"{t} {n}" for t, n in self.tags[:max_tags])]
         if len(self.tags) > max_tags:
             lines[-1] += f", … {len(self.tags) - max_tags} more"
+        if self.history_sources:
+            srcs = ", ".join(f"{s['source']} ({time.strftime('%Y-%m-%d', time.localtime(s['synced_at'])) if s.get('synced_at') else '?'})"
+                             for s in self.history_sources)
+            used = sum(1 for i in self.bookmarks if self.use(i)[0])
+            lines.append(f"BROWSING HISTORY from {srcs}: {used} bookmarks visited in the last 90 days")
         lines.append("DASHBOARD (tab: categories with counts):")
         for t in self.tabs:
             cats = ", ".join(f"{c['name']} {c['count']}" for c in t["categories"])

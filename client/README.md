@@ -2,7 +2,8 @@
 
 Stash-kirjanmerkkien hallinta luonnollisella kielellä Linuxin päätteestä. Kirjoitat mitä haluat, omalla
 koneellasi toimiva kielimalli (Ollama, oletuksena `qwen3.6:35b-a3b`) selvittää miten se tehdään, näyttää
-tarkalleen mitä muuttuisi ja muuttaa kirjanmerkkejä vasta kun hyväksyt.
+tarkalleen mitä muuttuisi ja muuttaa kirjanmerkkejä vasta kun hyväksyt. Malli toimii omalla koneellasi, joten
+kirjanmerkkisi, selaushistoriasi ja pyyntösi eivät päädy millekään pilvipalvelulle.
 
 ```
 > listaa kaikki mikä liittyy firmaan X
@@ -11,6 +12,9 @@ tarkalleen mitä muuttuisi ja muuttaa kirjanmerkkejä vasta kun hyväksyt.
 > poista ne
 > tarkista toimivatko linux-tagin linkit vielä ja korjaa siirtyneet
 > mitä kirjanmerkin 1234 takana on? tagita se kunnolla
+> tuo eniten käyttämäni kirjanmerkit työpöydälle ja järjestä käytetyimmät ylös
+> mitä sivuja käytän usein mutta en ole tallentanut?
+> mitkä työpöydän kirjanmerkit ovat olleet käyttämättä vuoden?
 ```
 
 ## Asennus
@@ -19,7 +23,7 @@ Tarvitset Pythonin 3.11+, pipx:n ja Ollaman, jossa on malli:
 
 ```sh
 ollama pull qwen3.6:35b-a3b
-pipx install --force https://stash.example.com/dl/stashai-0.1.3-py3-none-any.whl   # tarkka osoite: Stash → Asetukset → API-avaimet
+pipx install --force https://stash.example.com/dl/stashai-0.1.4-py3-none-any.whl   # tarkka osoite: Stash → Asetukset → API-avaimet
 stashai login https://stash.example.com      # liitä avain, jolla on muutosoikeus
 stashai doctor                                # tarkistaa Stashin, mallin ja kontekstin koon
 stashai                                       # käyttöliittymä
@@ -75,6 +79,12 @@ Periaatteet on otettu sortosta:
   lähiverkkoon ilman asetusta `allow_private`. Sivujen teksti on dataa, ei ohjeita: malli ei saa totella
   sivulla olevia käskyjä, ja vaikka yrittäisi, tuloksena on vain ehdotus, jonka näet ennen hyväksyntää.
   Verkkohaun kyselyt menevät DuckDuckGolle; `[web] search = "off"` tai oma SearXNG-osoite vaihtaa sen.
+- **Selaushistoria.** Kun Firefoxin historia on lähetetty Stashiin (`stash-history-sync.py`, ks. Stash →
+  Asetukset → Selaushistoria), jokaisella kirjanmerkillä näkyy mallille käyntimäärät (30 / 90 päivää / kaikki)
+  ja viimeisin käynti. Haussa voi rajata käytön mukaan (`used_min`, `unused_days`, `sort: "use"`), `history`
+  listaa käydyt osoitteet (myös ne, joita ei ole tallennettu), ja `sort_by_use` järjestää välilehden
+  kirjanmerkit ja kategoriat käytetyimmät ensin. Järjestyksen laskee ohjelma käyntimääristä, joten se on aina
+  johdonmukainen. Malli päättää vain, mitä nostetaan työpöydälle ja mihin.
 - **Kumottavissa.** Jokainen toteutettu muutos tallentuu Stashiin muutosjoukoksi, jossa on kosketettujen
   kirjanmerkkien aiempi tila. `/undo` (tai Stashin Asetukset → API-avaimilla tehdyt muutokset) palauttaa
   tagit, paikat ja tiedot, tuo poistetut takaisin ja poistaa lisätyt.

@@ -8,7 +8,7 @@ let root = null;
 export async function renderSettings(container) {
   root = container;
   root.className = 'view settings';
-  const cards = [appearance(), behaviour(), addButtons(), importExport(), apiKeys(), changeHistory(), account()];
+  const cards = [appearance(), behaviour(), addButtons(), importExport(), apiKeys(), changeHistory(), browsingHistory(), account()];
   fill(root, h('h1', null, t('Settings')), ...cards);
   if (state.user.is_admin) {
     const adminCard = h('section', { class: 'card' }, h('h2', null, t('Users and registration')));
@@ -188,6 +188,45 @@ function changeHistory() {
           h('td', null, c.undone_at ? h('span', { class: 'muted' }, t('Undone'))
             : h('button', { type: 'button', class: 'btn small', onclick: () => undo(c, draw) }, t('Undo'))))))))
         : h('p', { class: 'muted' }, t('Nothing yet.')));
+  };
+  draw();
+  return card;
+}
+
+function browsingHistory() {
+  const card = h('section', { class: 'card' });
+  const script = `${location.origin}/dl/stash-history-sync.py`;
+  const commands = [
+    `curl -o ~/stash-history-sync.py ${script}`,
+    'python3 ~/stash-history-sync.py --setup',
+    'python3 ~/stash-history-sync.py --schedule',
+  ].join('\n');
+  const draw = async () => {
+    const data = await attempt(() => api('GET', '/api/history/sources'));
+    if (!data) return;
+    fill(card,
+      h('h2', null, t('Browsing history')),
+      h('p', null, t('Your computers can send their Firefox history here. stashai then sees which bookmarks you really use: it can bring the most used ones to the Dashboard, put them first, and find often visited pages that are not bookmarked yet. The history stays on this server, is never part of the export and can be deleted here at any time.')),
+      data.sources.length ? h('div', { class: 'tablewrap' }, h('table', { class: 'table' },
+        h('thead', null, h('tr', null, [t('Computer'), t('Browser'), t('Addresses'), t('Last sync'), ''].map((x) => h('th', null, x)))),
+        h('tbody', null, data.sources.map((s) => h('tr', null,
+          h('td', null, s.source),
+          h('td', null, s.browser || '–'),
+          h('td', null, String(s.items)),
+          h('td', null, s.synced_at ? fmtWhen(s.synced_at) : '–'),
+          h('td', null, h('button', {
+            type: 'button', class: 'btn small danger',
+            onclick: async () => {
+              if (!await confirmBox(t('Delete the history sent by {name}? A scheduled sync sends it again unless you stop it on that computer.', { name: s.source }), { okLabel: t('Delete'), danger: true })) return;
+              await attempt(async () => { await api('DELETE', `/api/history/${encodeURIComponent(s.source)}`); await draw(); });
+            },
+          }, t('Delete'))))))))
+        : h('p', { class: 'muted' }, t('No history yet.')),
+      h('h3', null, t('Sending the history (macOS or Linux)')),
+      h('p', null, t('Run these in a terminal on the computer where you use Firefox. The script needs only the Python 3 of the system and an API key that can change. It sends every few hours; --dry-run shows what would be sent, --forget deletes it from here.')),
+      h('div', { class: 'row' },
+        h('textarea', { class: 'input mono', rows: 3, readOnly: true, value: commands, onfocus: (e) => e.target.select() }),
+        h('button', { type: 'button', class: 'btn', onclick: () => copyText(commands) }, t('Copy'))));
   };
   draw();
   return card;

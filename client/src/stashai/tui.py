@@ -23,6 +23,7 @@ Write what you want in plain language and press Enter, for example:
   delete those                        (refers to what was shown last)
   check whether the links tagged linux still work, and fix the moved ones
   what is behind bookmark 1234? tag it properly
+  bring my most used bookmarks to the Dashboard, most used first   (needs the browsing history)
 
 Nothing changes until you accept: a proposal is shown on the right with every change.
   y / Enter on an empty line = apply     n = reject     or write a correction instead

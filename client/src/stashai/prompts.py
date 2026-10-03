@@ -1,7 +1,7 @@
 """What the model is told. The instructions are in English (local models follow English best);
 the model answers the user in the user's own language."""
 
-TOOLS = ["search", "show", "judge", "combine", "fetch", "check", "web_search", "propose", "answer"]
+TOOLS = ["search", "show", "judge", "combine", "history", "fetch", "check", "web_search", "propose", "answer"]
 
 STEP_SCHEMA = {
     "type": "object",
@@ -32,7 +32,8 @@ notes, tags, tab and category ("match": "any" (default) or "all"; words of 3 let
 words only), "regex": "python regex", "host": ["example.com"] (subdomains too), "tags_any": [..], \
 "tags_all": [..], "tags_none": [..], "untagged": true, "tab": "name", "category": "name", \
 "where": "catalog" | "dashboard", "in_set": "S1", "not_in_set": "S2", "ids": [..], "exclude_ids": [..], \
-"added_after": "YYYY-MM-DD", "added_before": "YYYY-MM-DD".
+"added_after": "YYYY-MM-DD", "added_before": "YYYY-MM-DD", "used_min": N (visited at least N times in 90 days), \
+"unused_days": N (not visited in N days), "sort": "use" (most used first) or "position" (Dashboard order).
 show    – list bookmarks of a set: {"set": "S1", "offset": 0, "limit": 60}. Lines look like \
 "#id title | site/path | tags: a, b | Tab / Category (or Catalog) | notes: …".
 judge   – let the model read every bookmark of a set and keep the ones that match a question: \
@@ -42,6 +43,11 @@ Makes a set of the matches and a set of the unsure ones. Use it when words alone
 60 bookmarks, so narrow the set with search first; use "ALL" (every bookmark) only when no search can find \
 the candidates.
 combine – {"a": "S1", "b": "S2", "how": "union" | "intersect" | "minus", "label": "…"} makes a new set.
+history – the user's browsing history (when the OVERVIEW mentions it): {"text": "…", "host": "…", \
+"min_visits": 2, "period": "30d" | "90d" | "365d" | "all", "bookmarked": "any" | "yes" | "no", "limit": 50}. \
+Lists visited addresses, most visited first, with their visit counts and the bookmarks they match. \
+With "bookmarked": "no" it finds often used pages that are not bookmarked yet. When history exists, every \
+bookmark line also shows its visits (30d / 90d / all, last visit).
 fetch   – read one web page: {"url": "…"} or {"id": 123} (a bookmark). Gives the status, redirects and \
 final address, title, description, headings and the start of the text ("max_chars", default 3000). \
 Use it to find out what a link is about, whether it still works, or where it moved.
@@ -65,6 +71,10 @@ propose – changes for the user to accept: {"summary": "<one line in the user's
   {"op": "update", "id": 123, "title": "…", "url": "…", "notes": "…", "tags": [..]}   one bookmark
   {"op": "tag_each", "tags": {"123": ["a", "b"], "456": ["c"]}}   different tags for each bookmark (added; \
 "replace": true replaces their tags)
+  {"op": "sort_by_use", "tab": "Start"}                most used first: the bookmarks in each category and the \
+categories in each column of the tab (computed from the history; add "category": "…" for one category only, \
+leave out "tab" for all tabs)
+  {"op": "order_bookmarks", "tab": "Start", "category": "Daily", "ids": [..]}   these first, in this order
   {"op": "update_urls", "set": "S7"}                    give the moved links of a checked set their new address
   {"op": "create", "url": "…", "title": "…", "tags": [..], "tab": "…", "category": "…"}
   The ops run in order in one transaction. The RESULT is a preview of every change (or an error to fix). \

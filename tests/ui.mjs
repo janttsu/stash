@@ -268,7 +268,7 @@ try {
   // --- settings ---
   await goto('/#/settings');
   await js(HELPERS);
-  await until(`document.querySelectorAll('.settings .card').length === 8 && !!$t('.settings h2', 'Users and registration')`, 'eight settings cards incl. admin');
+  await until(`document.querySelectorAll('.settings .card').length === 9 && !!$t('.settings h2', 'Users and registration')`, 'nine settings cards incl. admin');
   // API key: created in a dialog, shown once, listed by its prefix, then revoked
   await js(`$click('.settings .btn', 'Create API key')`);
   await waitFor('dialog[open] input');

@@ -1328,15 +1328,22 @@ def export_bookmarks(c: Ctx = Depends(ctx)):
 
 from . import api_v1  # noqa: E402  (uses the helpers above)
 
+from . import history  # noqa: E402
+
+app.include_router(history.v1)    # before api_v1: /api/v1/history/... must not be taken for anything else
+app.include_router(history.session_api)
 app.include_router(api_v1.v1)
 app.include_router(api_v1.session_api)
 
 CLIENT_DIST = BASE / "client" / "dist"
+HISTORY_SCRIPT = BASE / "scripts" / "stash-history-sync.py"
 
 
 @app.api_route("/dl/{name}", methods=["GET", "HEAD"], include_in_schema=False)
 def client_download(name: str):
-    """The stashai terminal client as a wheel, for `pipx install https://…/dl/<wheel>`."""
+    """The stashai terminal client as a wheel (`pipx install https://…/dl/<wheel>`) and the history sync script."""
+    if name == HISTORY_SCRIPT.name:
+        return FileResponse(HISTORY_SCRIPT, media_type="text/x-python; charset=utf-8")
     path = CLIENT_DIST / name
     if not re.fullmatch(r"stashai-[\w.]+-py3-none-any\.whl", name) or not path.is_file():
         raise err(404, "not_found")

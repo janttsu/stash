@@ -46,7 +46,7 @@ class NetscapeParser(HTMLParser):
             self._last = {
                 "url": self._attrs.get("href", "").strip(),
                 "title": self._buf.strip(),
-                "notes": self._attrs.get("notes", "").strip(),  # Bookmark Ninja's attribute; <DD> text overrides
+                "notes": self._attrs.get("notes", "").strip(),  # NOTES attribute of some bookmark managers; <DD> text overrides
                 "tags": tags,
                 "add_date": _timestamp(self._attrs.get("add_date", "")),
                 "path": [name for name, _ in folders],

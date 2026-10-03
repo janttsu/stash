@@ -115,6 +115,32 @@ CREATE TABLE IF NOT EXISTS changesets (
     undone_at  INTEGER
 );
 CREATE INDEX IF NOT EXISTS changesets_user ON changesets(user_id, id);
+-- browsing history sent by a device (stash-history-sync); one row per address and device,
+-- visit counts are as of synced_at. Never exported, deleted with the account.
+CREATE TABLE IF NOT EXISTS history (
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source      TEXT NOT NULL,
+    url         TEXT NOT NULL,
+    url_key     TEXT NOT NULL,
+    host        TEXT NOT NULL DEFAULT '',
+    title       TEXT NOT NULL DEFAULT '',
+    visits      INTEGER NOT NULL DEFAULT 0,
+    visits_30d  INTEGER NOT NULL DEFAULT 0,
+    visits_90d  INTEGER NOT NULL DEFAULT 0,
+    visits_365d INTEGER NOT NULL DEFAULT 0,
+    first_visit INTEGER,
+    last_visit  INTEGER,
+    PRIMARY KEY (user_id, source, url)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS history_key ON history(user_id, url_key);
+CREATE TABLE IF NOT EXISTS history_sources (
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source    TEXT NOT NULL,
+    browser   TEXT NOT NULL DEFAULT '',
+    items     INTEGER NOT NULL DEFAULT 0,
+    synced_at INTEGER,
+    PRIMARY KEY (user_id, source)
+);
 """
 
 
