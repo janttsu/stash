@@ -29,12 +29,12 @@ def test_without_history_nothing_changes(api):
     agent = make(api, [step("history", text="x"), step("answer", message="ok")])
     assert "visits" not in agent.store.line(next(iter(agent.store.bookmarks)))
     assert "BROWSING HISTORY" not in agent.store.overview()
-    agent.ask("mitä käytän eniten?")
+    agent.ask("what do I use most?")
     assert "no browsing history in Stash yet" in agent.llm.calls[1][-1]["content"]
 
 
 def test_usage_on_lines_search_and_history_tool(api):
-    send_history(api, [("https://acme.example/docs", "ACME docs", 40), ("http://recipes.example/pulla/", "Pulla", 3),
+    send_history(api, [("https://acme.example/docs", "ACME docs", 40), ("http://recipes.example/buns/", "Pulla", 3),
                        ("https://often.example/", "Often used, no bookmark", 25)])
     agent = make(api, [
         step("history", bookmarked="no", min_visits=5),
@@ -46,33 +46,33 @@ def test_usage_on_lines_search_and_history_tool(api):
     assert "visits: none" in agent.store.line(t["ACME blog"])
     assert "BROWSING HISTORY from macbook" in agent.store.overview() and "2 bookmarks visited" in agent.store.overview()
     assert agent.store.search(unused_days=30) and t["ACME documentation"] not in agent.store.search(unused_days=30)
-    agent.ask("mitä käytän usein mutta en ole tallentanut?")
+    agent.ask("what do I use often but have not bookmarked?")
     hist = agent.llm.calls[1][-1]["content"]
     assert "https://often.example/ | Often used, no bookmark | 30d 25" in hist and "NOT bookmarked" in hist
     assert "acme.example" not in hist
     assert "Stash holds 3 different visited addresses (macbook: 3 rows, visits" in hist
     assert "With the filters min_visits=5, period=90d, bookmarked=no: 1 match" in hist
     found = agent.llm.calls[2][-1]["content"]
-    assert found.index("ACME documentation") < found.index("Pulla recipe"), "most used first"
+    assert found.index("ACME documentation") < found.index("Bun recipe"), "most used first"
 
 
 def test_sort_by_use_orders_bookmarks_and_categories(api):
     api.changes([
-        {"op": "create", "url": "https://a.example/", "title": "Rarely", "tab": "Työ", "category": "Asiakkaat"},
-        {"op": "create", "url": "https://b.example/", "title": "Daily", "tab": "Työ", "category": "Asiakkaat"},
-        {"op": "create", "url": "https://c.example/", "title": "Tools", "tab": "Työ", "category": "Työkalut"},
+        {"op": "create", "url": "https://a.example/", "title": "Rarely", "tab": "Work", "category": "Clients"},
+        {"op": "create", "url": "https://b.example/", "title": "Daily", "tab": "Work", "category": "Clients"},
+        {"op": "create", "url": "https://c.example/", "title": "Tools", "tab": "Work", "category": "Utilities"},
     ], "setup", dry_run=False)
     send_history(api, [("https://b.example/", "", 50), ("https://a.example/", "", 1), ("https://c.example/", "", 200)])
-    agent = make(api, [step("propose", summary="Käytetyimmät ylös", ops=[{"op": "sort_by_use", "tab": "työ"}])])
-    out = agent.ask("järjestä työ-välilehti käytön mukaan")
+    agent = make(api, [step("propose", summary="Most used first", ops=[{"op": "sort_by_use", "tab": "work"}])])
+    out = agent.ask("order the work tab by use")
     p = out.plan.preview
     pos = {e["title"]: e["position"] for e in p["diff"]}
     assert pos == {"Daily": [3, 1], "ACME blog": [1, 3]}  # Rarely (1 visit) stays second
     text = "\n".join(plan_text(out.plan.summary, p))
     assert "place 3 → 1" in text
-    if p["categories"]:  # both categories in one column: Työkalut (200 visits) goes first
-        assert "ORDER   Työ / Työkalut" in text
+    if p["categories"]:  # both categories in one column: Utilities (200 visits) goes first
+        assert "ORDER   Work / Utilities" in text
     agent.apply()
     agent.undo()
-    assert {b.title: b.position for b in agent.store.bookmarks.values() if b.category == "Asiakkaat"} == \
+    assert {b.title: b.position for b in agent.store.bookmarks.values() if b.category == "Clients"} == \
         {"ACME blog": 0, "Rarely": 1, "Daily": 2}

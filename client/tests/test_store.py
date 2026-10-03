@@ -13,7 +13,7 @@ def test_text_search_any_and_all(store):
         "ACME blog", "ACME documentation", "Acme buys Widgets Inc", "Knowledge base: DNS"]  # its url has acme
     assert titles(store, store.search(text=["acme", "blog"], match="all")) == ["ACME blog"]
     # the tab and category names are searchable too
-    assert titles(store, store.search(text=["asiakkaat"])) == ["ACME blog"]
+    assert titles(store, store.search(text=["clients"])) == ["ACME blog"]
 
 
 def test_short_words_match_whole_words_only(store):
@@ -28,12 +28,12 @@ def test_host_matches_www_and_subdomains(store):
 
 
 def test_tags_and_places(store):
-    assert titles(store, store.search(tags_any=["dns", "ruoka"])) == ["Knowledge base: DNS", "Pulla recipe"]
+    assert titles(store, store.search(tags_any=["dns", "food"])) == ["Bun recipe", "Knowledge base: DNS"]
     assert titles(store, store.search(tags_all=["acme", "docs"])) == ["ACME documentation"]
     assert titles(store, store.search(text=["acme"], tags_none=["acme"])) == ["Acme buys Widgets Inc", "Knowledge base: DNS"]
     assert titles(store, store.search(untagged=True)) == ["X"]
     assert titles(store, store.search(where="dashboard")) == ["ACME blog"]
-    assert titles(store, store.search(tab="työ", category="asiakkaat")) == ["ACME blog"]
+    assert titles(store, store.search(tab="work", category="clients")) == ["ACME blog"]
     assert store.search(added_after="2000-01-01") and not store.search(added_before="2000-01-01")
 
 
@@ -54,9 +54,9 @@ def test_sets(store):
 
 def test_lines_and_overview(store):
     blog = ids_by_title(store)["ACME blog"]
-    assert store.line(blog) == f"#{blog} ACME blog | acme.example/blog | tags: acme | Työ / Asiakkaat"
+    assert store.line(blog) == f"#{blog} ACME blog | acme.example/blog | tags: acme | Work / Clients"
     text = store.describe(store.search(text=["acme"]))
     assert text.startswith("4 bookmarks\ntags: acme 2")
     ov = store.overview()
-    assert "7 bookmarks (6 in the Catalog" in ov and "acme 2" in ov and "- Työ: Asiakkaat 1" in ov
+    assert "7 bookmarks (6 in the Catalog" in ov and "acme 2" in ov and "- Work: Clients 1" in ov
     assert short_url("https://www.example.com/") == "example.com"

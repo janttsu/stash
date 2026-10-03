@@ -18,10 +18,10 @@ def test_ask_preview_apply_and_undo(api, tmp_path, monkeypatch):
         return {"thought": f"calling {tool}", "tool": tool, "args": args}
 
     llm = FakeLLM([
-        step("search", label="pulla", text=["pulla"]),
-        step("propose", summary="Poista pullaresepti", ops=[{"op": "delete", "set": "S1"}]),
+        step("search", label="buns", text=["buns"]),
+        step("propose", summary="Delete the bun recipe", ops=[{"op": "delete", "set": "S1"}]),
         step("search", label="acme", text=["acme"]),
-        step("answer", message="Neljä osumaa.", show="S2"),
+        step("answer", message="Four matches.", show="S2"),
     ])
     logs = []
 
@@ -60,18 +60,18 @@ def test_ask_preview_apply_and_undo(api, tmp_path, monkeypatch):
                     if not app.busy:
                         break
 
-            await send("poista pullaresepti")
-            assert "Proposal: Poista pullaresepti" in text_of(log_w)
-            assert "DELETE  #" in text_of(view) and "Pulla recipe" in text_of(view)
+            await send("delete the bun recipe")
+            assert "Proposal: Delete the bun recipe" in text_of(log_w)
+            assert "DELETE  #" in text_of(view) and "Bun recipe" in text_of(view)
             assert len(app.agent.store.bookmarks) == 7
             await send("y")
             assert "Done: change #" in text_of(log_w) and len(app.agent.store.bookmarks) == 6
             await send("/undo")
             assert "Undid #" in text_of(log_w) and len(app.agent.store.bookmarks) == 7
-            await send("listaa acme")
-            assert "Neljä osumaa." in text_of(log_w) and "S2: 4 bookmarks" in text_of(view)
+            await send("list acme")
+            assert "Four matches." in text_of(log_w) and "S2: 4 bookmarks" in text_of(view)
             await send("/history")
-            assert "Poista pullaresepti" in text_of(view) and "undone" in text_of(view)
+            assert "Delete the bun recipe" in text_of(view) and "undone" in text_of(view)
             await send("/nonsense")
             assert "Unknown command" in text_of(log_w)
             await pilot.press("f1")

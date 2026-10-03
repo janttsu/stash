@@ -50,11 +50,11 @@ with TestClient(app):
     assert ok(R.get("/api/v1/me")) == {"user": "alice", "key": "lukija", "can_write": False, "bookmarks": 0}
 
     # --- creating through changes ---
-    res = ok(W.post("/api/v1/changes", json={"summary": "lisäys", "ops": [
+    res = ok(W.post("/api/v1/changes", json={"summary": "adding", "ops": [
         {"op": "create", "url": "https://acme.example/docs", "title": "ACME docs", "tags": ["Acme", "docs"]},
         {"op": "create", "url": "https://www.acme.example/blog", "title": "ACME blog", "tags": ["acme"],
-         "tab": "Työ", "category": "Acme"},
-        {"op": "create", "url": "https://news.example/", "title": "News", "tags": ["uutiset"]},
+         "tab": "Work", "category": "Acme"},
+        {"op": "create", "url": "https://news.example/", "title": "News", "tags": ["news"]},
         {"op": "create", "url": "https://news.example/", "title": "News again"},
     ]}))
     assert res["counts"]["created"] == 3 and res["skipped"][0]["reason"] == "exists"
@@ -63,10 +63,10 @@ with TestClient(app):
     snap = ok(R.get("/api/v1/snapshot"))
     by_title = {b["title"]: b for b in snap["bookmarks"]}
     assert len(snap["bookmarks"]) == 3, "bob's bookmark is not visible"
-    assert by_title["ACME blog"]["tab"] == "Työ" and by_title["ACME blog"]["category"] == "Acme"
+    assert by_title["ACME blog"]["tab"] == "Work" and by_title["ACME blog"]["category"] == "Acme"
     assert by_title["ACME docs"]["tags"] == ["acme", "docs"] and by_title["ACME docs"]["category_id"] is None
     assert ["acme", 2] in snap["tags"]
-    assert [t["name"] for t in snap["tabs"]][-1] == "Työ"
+    assert [t["name"] for t in snap["tabs"]][-1] == "Work"
     docs, blog, news = by_title["ACME docs"]["id"], by_title["ACME blog"]["id"], by_title["News"]["id"]
 
     # --- reading ---
@@ -78,46 +78,46 @@ with TestClient(app):
     assert ok(R.get("/api/v1/structure"))["catalog"] == 2
 
     # --- dry run changes nothing and shows the diff ---
-    ops = {"summary": "acme -> yritys-x", "ops": [
-        {"op": "rename_tag", "old": "acme", "new": "yritys-x"},
-        {"op": "add_tags", "ids": [news, bob_bm], "tags": ["luettava"]},
-        {"op": "move", "ids": [docs], "tab": "Työ", "category": "Acme"},
+    ops = {"summary": "acme -> company-x", "ops": [
+        {"op": "rename_tag", "old": "acme", "new": "company-x"},
+        {"op": "add_tags", "ids": [news, bob_bm], "tags": ["to-read"]},
+        {"op": "move", "ids": [docs], "tab": "Work", "category": "Acme"},
     ]}
     dry = ok(R.post("/api/v1/changes", json={**ops, "dry_run": True}))  # dry runs are fine with a read key
     assert dry["dry_run"] and dry["changeset"] is None and dry["counts"]["updated"] == 3
     assert dry["skipped"][0]["ids"] == [bob_bm]
     d = {e["id"]: e for e in dry["diff"]}
-    assert d[docs]["tags"] == [["acme", "docs"], ["docs", "yritys-x"]] and d[docs]["location"] == ["Catalog", "Työ / Acme"]
+    assert d[docs]["tags"] == [["acme", "docs"], ["company-x", "docs"]] and d[docs]["location"] == ["Catalog", "Work / Acme"]
     assert ok(R.get("/api/v1/bookmarks", params={"tags": "acme"}))["total"] == 2, "dry run rolled back"
     real = ok(W.post("/api/v1/changes", json=ops))
     assert real["changeset"] and real["counts"] == dry["counts"]
-    assert ok(R.get("/api/v1/bookmarks", params={"tags": "yritys-x"}))["total"] == 2
-    assert ok(R.get("/api/v1/bookmarks", params={"q": "yritys-x"}))["total"] == 2, "search text reindexed"
+    assert ok(R.get("/api/v1/bookmarks", params={"tags": "company-x"}))["total"] == 2
+    assert ok(R.get("/api/v1/bookmarks", params={"q": "company-x"}))["total"] == 2, "search text reindexed"
     assert ok(other.get("/api/tags"))["tags"] == [["x", 1]], "bob untouched"
 
     # --- delete, then undo ---
-    gone = ok(W.post("/api/v1/changes", json={"summary": "siivous", "ops": [{"op": "delete", "ids": [docs, news]}]}))
+    gone = ok(W.post("/api/v1/changes", json={"summary": "cleanup", "ops": [{"op": "delete", "ids": [docs, news]}]}))
     assert gone["counts"]["deleted"] == 2
     assert ok(R.get("/api/v1/me"))["bookmarks"] == 1
     hist = ok(R.get("/api/v1/changes"))["changes"]
-    assert [h["summary"] for h in hist] == ["siivous", "acme -> yritys-x", "lisäys"]
+    assert [h["summary"] for h in hist] == ["cleanup", "acme -> company-x", "adding"]
     ok(W.post(f"/api/v1/changes/{real['changeset']}/undo"), 409)  # a later change touched the same bookmarks
     ok(R.post(f"/api/v1/changes/{gone['changeset']}/undo"), 403)
     assert ok(W.post(f"/api/v1/changes/{gone['changeset']}/undo")) == {"restored": 2, "removed": 0}
     ok(W.post(f"/api/v1/changes/{gone['changeset']}/undo"), 409)
     back = {b["id"]: b for b in ok(R.get("/api/v1/snapshot"))["bookmarks"]}
-    assert back[docs]["tags"] == ["docs", "yritys-x"] and back[docs]["category"] == "Acme"
-    assert back[news]["tags"] == ["luettava", "uutiset"]
+    assert back[docs]["tags"] == ["company-x", "docs"] and back[docs]["category"] == "Acme"
+    assert back[news]["tags"] == ["news", "to-read"]
     # now the rename can be undone, through the web UI's route
     ok(web.post(f"/api/changes/{real['changeset']}/undo"))
     back = {b["id"]: b for b in ok(R.get("/api/v1/snapshot"))["bookmarks"]}
     assert back[docs]["tags"] == ["acme", "docs"] and back[docs]["category_id"] is None
-    assert back[news]["tags"] == ["uutiset"] and back[blog]["tags"] == ["acme"]
+    assert back[news]["tags"] == ["news"] and back[blog]["tags"] == ["acme"]
     # undoing the creation removes the created bookmarks, category and tab
     first = hist[-1]["id"]
     assert ok(W.post(f"/api/v1/changes/{first}/undo")) == {"restored": 0, "removed": 3}
     assert ok(R.get("/api/v1/snapshot"))["tabs"] == [t for t in ok(R.get("/api/v1/structure"))["tabs"]]
-    assert "Työ" not in [t["name"] for t in ok(R.get("/api/v1/structure"))["tabs"]]
+    assert "Work" not in [t["name"] for t in ok(R.get("/api/v1/structure"))["tabs"]]
     assert ok(web.get("/api/changes"))["changes"][0]["undone_at"]
 
     # --- updating one bookmark's address and title ---

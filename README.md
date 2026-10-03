@@ -1,136 +1,141 @@
 # Stash
 
-Itse ylläpidetty kirjanmerkkien hallinta, jota voi käyttää selaimella, toiselta koneelta API:n kautta ja
-luonnollisella kielellä paikallisen kielimallin avulla.
+A self-hosted bookmark manager you can use in the browser, from other computers through an API, and in
+plain language with a language model running on your own machine.
 
-**Kaikki pysyy omissa käsissä.** Stash pyörii omalla palvelimellasi, ja kirjanmerkit, selaushistoria ja
-muutoshistoria ovat sinun tietokannassasi. Kielimalli toimii omalla koneellasi (Ollama), joten mikään
-pilvipalvelu ei näe, mitä tallennat, mitä luet tai mitä mallilta kysyt. Juuri tämä on itse hostauksen iso
-etu: selaushistoriasta saa hyödyn irti luovuttamatta sitä kenellekään.
+**Everything stays in your hands.** Stash runs on your own server, and your bookmarks, browsing history and
+change history live in your own database. The language model runs on your own computer (Ollama), so no cloud
+service sees what you save, what you read or what you ask. That is the big advantage of hosting it yourself:
+you get real use out of your browsing history without handing it to anyone.
 
-## Osat
+## What it consists of
 
-1. **Palvelinsovellus** (`app/`, `static/`): selaimella käytettävä kirjanmerkkien hallinta.
-   - **Työpöytä**: välilehdet, joilla kategoriat sarakkeissa ja kirjanmerkit niiden sisällä, raahaamalla järjestettävä.
-   - **Katalogi**: tunnisteilla (tageilla) järjestetty varasto ja nopea haku.
-   - Tuonti ja vienti selainten kirjanmerkkitiedostona, välilehtien jakaminen linkillä, duplikaattien ja
-     kuolleiden linkkien etsintä, kirjanmerkkisovelma, selainlaajennus, kaksivaiheinen tunnistautuminen,
-     kutsuihin perustuva rekisteröityminen, suomi ja englanti.
-   - **API** (`/api/v1`) API-avaimilla: kaikki kirjanmerkit kerralla, haku ja muutokset esikatseluineen.
-     Jokaisen muutoksen voi kumota.
-2. **stashai** (`client/`): Linuxin pääteohjelma, jolle annetaan ohjeita luonnollisella kielellä
-   ("siirrä kaikki firmaan X liittyvät tagille Y", "tarkista toimivatko nämä linkit vielä"). Omalla koneella
-   toimiva kielimalli tutkii kirjanmerkit API:n kautta, voi lukea verkkosivuja ja selaushistoriaa ja
-   ehdottaa muutoksia. Mitään ei muuteta ennen kuin hyväksyt esikatselun, ja kaiken voi kumota.
-   Ks. [`client/README.md`](client/README.md).
-3. **Selaushistorian vienti** (`scripts/stash-history-sync.py`): pieni skripti (macOS ja Linux, pelkkä
-   Python 3), joka lähettää Firefoxin selaushistorian käyntimäärät Stashiin muutaman tunnin välein.
-   Silloin stashai näkee, mitä kirjanmerkkejä oikeasti käytät: se voi tuoda käytetyimmät työpöydälle,
-   järjestää kirjanmerkit ja kategoriat käytön mukaan, löytää usein käytetyt sivut, joita ei ole vielä
-   tallennettu, ja ehdottaa vuosiin käyttämättömien siivoamista. Historia tallentuu vain omalle
-   palvelimellesi, ei kuulu kirjanmerkkien vientiin ja sen voi poistaa laitekohtaisesti asetuksista.
-   Ennen lähetystä osoitteista poistetaan salaisuuksia usein sisältävät parametrit (token, session, code…),
-   ja sivustoja voi jättää kokonaan pois.
+1. **The server application** (`app/`, `static/`): a bookmark manager for the browser.
+   - **Dashboard**: tabs with categories in columns and bookmarks inside them, arranged by dragging.
+   - **Catalog**: a tagged store with fast search.
+   - Import and export as a browser bookmarks file, sharing a tab by link, finding duplicates and dead links,
+     a bookmarklet, a browser extension, two-factor authentication, invitation-based registration, English
+     and Finnish.
+   - **API** (`/api/v1`) with API keys: all bookmarks at once, search, and changes with exact previews.
+     Every change can be undone.
+2. **stashai** (`client/`): a Linux terminal program you give instructions in plain language ("move
+   everything about company X to tag Y", "check whether these links still work"). A language model on your own
+   computer studies the bookmarks through the API, can read web pages and your browsing history, and proposes
+   changes. Nothing changes until you accept the preview, and everything can be undone.
+   See [`client/README.md`](client/README.md).
+3. **Browsing history sync** (`scripts/stash-history-sync.py`): a small script (macOS and Linux, plain
+   Python 3) that sends Firefox's visit counts to Stash every few hours. Then stashai knows which bookmarks you
+   really use: it can bring the most used ones to the Dashboard, order bookmarks and categories by use, find
+   often visited pages that are not bookmarked yet, and suggest cleaning up the ones unused for years. The
+   history is stored only on your own server, is never part of the bookmark export and can be deleted per
+   device in Settings. Before sending, query parameters that often carry secrets (token, session, code, …) are
+   removed, and whole sites can be left out.
 
-## Rakenne
+## Layout
 
-| Polku | Sisältö |
+| Path | Contents |
 | --- | --- |
-| `app/main.py` | FastAPI-rajapinta: tilit, välilehdet, kategoriat, kirjanmerkit, haku, jako, tuonti/vienti |
-| `app/db.py` | SQLite-skeema ja yhteydet (`data/stash.db`, WAL) |
-| `app/net.py` | Ulospäin lähtevät haut (kuolleet linkit, otsikot, favicon-välimuisti) – vain julkisiin osoitteisiin |
-| `app/security.py` | Salasanat (scrypt), istunnot, TOTP, yritysten rajoitin |
-| `app/api_v1.py` | API-avaimilla käytettävä `/api/v1` sekä avainten ja muutoshistorian hallinta |
-| `app/history.py` | Laitteiden lähettämä selaushistoria: vastaanotto, käyntimäärät kirjanmerkeille, haku |
-| `client/` | stashai-pääteohjelma (oma Python-paketti) |
-| `scripts/stash-history-sync.py` | Firefoxin historian lähetys Stashiin (jaetaan osoitteessa `/dl/stash-history-sync.py`) |
-| `app/importer.py` | Selainten kirjanmerkkitiedoston (Netscape HTML) luku ja kirjoitus |
-| `static/` | Käyttöliittymä: natiivit ES-moduulit, ei käännösvaihetta |
-| `extension/` | Selainlaajennus (ladataan sovelluksesta `/extension.zip`) |
-| `data/` | Tietokanta ja favicon-välimuisti – ei versionhallinnassa, varmuuskopioi tämä |
+| `app/main.py` | FastAPI app: accounts, tabs, categories, bookmarks, search, sharing, import/export |
+| `app/db.py` | SQLite schema and connections (`data/stash.db`, WAL) |
+| `app/net.py` | Outgoing requests (dead links, titles, favicon cache), to public addresses only |
+| `app/security.py` | Passwords (scrypt), sessions, TOTP, rate limiting |
+| `app/api_v1.py` | `/api/v1` for API keys, plus managing keys and the change history |
+| `app/history.py` | Browsing history sent by devices: upload, visit counts for bookmarks, search |
+| `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
+| `client/` | The stashai terminal program (its own Python package) |
+| `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
+| `static/` | The web UI: native ES modules, no build step |
+| `extension/` | Browser extension (downloadable from the app at `/extension.zip`) |
+| `data/` | Database and favicon cache: not in version control, back this up |
 
-## Ylläpito
+## Running it
 
 ```sh
-systemctl --user status stash          # palvelu (uvicorn, käänteisvälityspalvelin edessä)
-systemctl --user restart stash         # koodimuutosten jälkeen (static/-muutokset eivät vaadi)
-journalctl --user -u stash -f          # lokit
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+STASH_ORIGIN=https://stash.example.com .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8003
+```
 
-cd ~/stash
-.venv/bin/python -m app.cli invite                  # kertakäyttöinen kutsulinkki (myös ensimmäiselle tilille)
-.venv/bin/python -m app.cli users                   # tilit
-.venv/bin/python -m app.cli reset-password NIMI     # uusi satunnainen salasana, 2FA pois
+Put a reverse proxy with HTTPS in front of it (for example Caddy or nginx). As a systemd user service:
+
+```sh
+systemctl --user status stash          # the service
+systemctl --user restart stash         # after code changes (changes in static/ need no restart)
+journalctl --user -u stash -f          # logs
+
+.venv/bin/python -m app.cli invite                  # one-time invitation link (also needed for the first account)
+.venv/bin/python -m app.cli users                   # accounts
+.venv/bin/python -m app.cli reset-password NAME     # new random password, turns off 2FA
 .venv/bin/python -m app.cli registration invite     # open | invite | closed
 ```
 
-Ensimmäisenä luotu tili on ylläpitäjä. Rekisteröityminen on oletuksena vain kutsulinkillä; ylläpitäjä luo
-kutsuja ja vaihtaa tilaa kohdasta Asetukset → Käyttäjät ja rekisteröityminen.
+The first account is the administrator. By default you can only register with an invitation link; the
+administrator creates invitations and changes the mode in Settings → Users and registration.
 
-Ympäristömuuttujat: `STASH_ORIGIN` (julkinen osoite), `STASH_DATA` (datahakemisto, oletus `./data`).
+Environment variables: `STASH_ORIGIN` (public address), `STASH_DATA` (data directory, default `./data`).
 
-## API ja stashai
+## The API and stashai
 
-Muut koneet ja ohjelmat käyttävät Stashia osoitteessa `/api/v1` API-avaimella
-(`Authorization: Bearer stash_…`). Avaimet luodaan kohdassa Asetukset → API-avaimet; tietokantaan
-tallentuu vain avaimen tiiviste. Avain on vain luku -avain, ellei sille sallita muutoksia. `/api/v1` ei
-hyväksy istuntoevästettä, joten se ei tarvitse CSRF-otsaketta.
+Other computers and programs use Stash at `/api/v1` with an API key (`Authorization: Bearer stash_…`).
+Keys are created in Settings → API keys; only a hash of the key is stored. A key can only read unless it is
+allowed to make changes. `/api/v1` never accepts the session cookie, so it needs no CSRF header.
 
-| Kutsu | Mitä tekee |
+| Call | What it does |
 | --- | --- |
-| `GET /api/v1/me` | käyttäjä, avaimen nimi ja oikeudet, kirjanmerkkien määrä |
-| `GET /api/v1/snapshot` | kaikki kirjanmerkit kerralla + työpöydän rakenne + tagit |
-| `GET /api/v1/bookmarks?q=&tags=&mode=&host=&untagged=&scope=&ids=&limit=&offset=` | haku (enintään 1000 kerralla) |
-| `GET /api/v1/tags`, `GET /api/v1/structure` | tagit määrineen, välilehdet ja kategoriat |
-| `POST /api/v1/changes` | `{"ops": [...], "summary": "...", "dry_run": true}` – muutokset yhtenä transaktiona |
-| `GET /api/v1/changes`, `POST /api/v1/changes/{id}/undo[?force=true]` | muutoshistoria ja kumoaminen |
-| `POST /api/v1/history/{laite}` | `{"items": [...], "reset": true, "done": true}` – laitteen selaushistoria (korvaa aiemman) |
-| `GET /api/v1/history?q=&host=&min_visits=&period=&bookmarked=` | käydyt osoitteet käytetyimmät ensin, ja mihin kirjanmerkkeihin ne osuvat |
-| `GET /api/v1/history/usage`, `GET /api/v1/history/sources`, `DELETE /api/v1/history/{laite}` | kirjanmerkkien käyntimäärät, laitteet, poisto |
+| `GET /api/v1/me` | user, key name and rights, number of bookmarks |
+| `GET /api/v1/snapshot` | all bookmarks at once + Dashboard structure + tags |
+| `GET /api/v1/bookmarks?q=&tags=&mode=&host=&untagged=&scope=&ids=&limit=&offset=` | search (up to 1000 at a time) |
+| `GET /api/v1/tags`, `GET /api/v1/structure` | tags with counts, tabs and categories |
+| `POST /api/v1/changes` | `{"ops": [...], "summary": "...", "dry_run": true}`: changes in one transaction |
+| `GET /api/v1/changes`, `POST /api/v1/changes/{id}/undo[?force=true]` | change history and undo |
+| `POST /api/v1/history/{device}` | `{"items": [...], "reset": true, "done": true}`: a device's browsing history (replaces its earlier one) |
+| `GET /api/v1/history?q=&host=&min_visits=&period=&bookmarked=` | visited addresses, most visited first, with the bookmarks they match |
+| `GET /api/v1/history/usage`, `GET /api/v1/history/sources`, `DELETE /api/v1/history/{device}` | visit counts of bookmarks, devices, deleting |
 
-Operaatiot: `add_tags`, `remove_tags`, `set_tags` (`ids`, `tags`), `rename_tag` (`old`, `new`; tyhjä
-`new` poistaa tagin), `delete` (`ids`), `move` (`ids` + `category_id` tai `tab`+`category`, puuttuvat
-luodaan, tai `catalog: true`), `update` (`id` + `title`/`url`/`notes`/`color`/`tags`), `create`
-(`url`, `title`, `tags`, paikka kuten `move`), `order_bookmarks` (kategorian kirjanmerkit annettuun
-järjestykseen), `order_categories` (välilehden kategoriat järjestykseen, kukin sarakkeensa sisällä). `dry_run` ajaa operaatiot ja peruu ne, joten esikatselu
-(`diff`: jokaisen kirjanmerkin tagit, paikka ja kentät ennen/jälkeen) on täsmälleen se mitä tapahtuisi.
-Oikea ajo tallentaa muutosjoukon (`changesets`, 200 viimeisintä) kosketettujen kirjanmerkkien aiemman tilan
-kanssa; kumoaminen palauttaa ne, tuo poistetut takaisin ja poistaa lisätyt. Jos myöhempi muutos koski
-samoja kirjanmerkkejä, kumoaminen vaatii `force=true`. Muutokset näkyvät ja kumoutuvat myös kohdassa
-Asetukset → API-avaimilla tehdyt muutokset.
+Operations: `add_tags`, `remove_tags`, `set_tags` (`ids`, `tags`), `rename_tag` (`old`, `new`; an empty `new`
+removes the tag), `delete` (`ids`), `move` (`ids` + `category_id`, or `tab` + `category` which are created when
+missing, or `catalog: true`), `update` (`id` + `title`/`url`/`notes`/`color`/`tags`), `create` (`url`, `title`,
+`tags`, a place as for `move`), `order_bookmarks` (a category's bookmarks in the given order) and
+`order_categories` (a tab's categories in order, each within its column). `dry_run` runs the operations and
+rolls them back, so the preview (`diff`: each bookmark's tags, place, position and fields before and after) is
+exactly what would happen. A real run stores a changeset (the latest 200) with the earlier state of every
+touched bookmark and category; undoing it restores them, brings deleted bookmarks back and removes added ones.
+If a later change touched the same bookmarks, undo needs `force=true`. Changes can also be seen and undone in
+Settings → Changes made with API keys.
 
-Selaushistoria yhdistetään kirjanmerkkeihin väljällä osoitevertailulla (http/https, `www.` ja
-loppukauttaviiva eivät vaikuta). Jokainen laite lähettää osoitekohtaiset käyntimäärät (30, 90 ja 365
-päivää sekä kaikki), ja uusi lähetys korvaa saman laitteen aiemmat rivit.
+Browsing history is matched to bookmarks loosely (http/https, `www.` and a trailing slash do not matter). Each
+device sends visit counts per address (last 30, 90 and 365 days, and all), and a new sync replaces that
+device's earlier rows.
 
-`client/` on **stashai**, Linuxin pääteohjelma, joka tekee pyyntöjä luonnollisella kielellä paikallisen
-kielimallin avulla (ks. `client/README.md`). Paketti rakennetaan komennolla
-`client/.venv/bin/pip wheel --no-deps -w client/dist client/`, ja Stash jakaa sen osoitteessa
-`/dl/stashai-<versio>-py3-none-any.whl` (asetussivu näyttää uusimman `pipx install` -komennon).
+`client/` is **stashai** (see [`client/README.md`](client/README.md)). The package is built with
+`client/.venv/bin/pip wheel --no-deps -w client/dist client/`, and Stash serves it at
+`/dl/stashai-<version>-py3-none-any.whl` (Settings shows the current `pipx install` command).
 
-Historian lähetys Macilta (tai Linuxilta), jolla Firefoxia käytetään:
+Sending the history from the Mac (or Linux computer) where Firefox is used:
 
 ```sh
 curl -o ~/stash-history-sync.py https://stash.example.com/dl/stash-history-sync.py
-python3 ~/stash-history-sync.py --setup       # osoite, API-avain (muutosoikeus), koneen nimi
-python3 ~/stash-history-sync.py --dry-run     # näyttää mitä lähetettäisiin
-python3 ~/stash-history-sync.py --schedule    # lähettää 6 tunnin välein (launchd / cron)
+python3 ~/stash-history-sync.py --setup       # Stash address, an API key that can change, a name for this computer
+python3 ~/stash-history-sync.py --dry-run     # shows what would be sent
+python3 ~/stash-history-sync.py --schedule    # sends every 6 hours (launchd / cron)
 ```
 
-## Testit
+## Tests
 
 ```sh
-.venv/bin/python tests/smoke.py    # rajapinta päästä päähän, väliaikainen tietokanta
-.venv/bin/python tests/api_v1.py   # API-avaimet, /api/v1, esikatselu ja kumoaminen
-.venv/bin/python tests/history.py  # historiaskripti tekaistua Firefox-profiilia vasten, historia-API, järjestäminen
-client/.venv/bin/python -m pytest -q client/tests   # stashai: haku, agentti, malliyhteys, TUI
-node tests/ui.mjs                  # headless Chromium, oma palvelin portissa 8013, kuvat → data/tmp/
-node tools/check-i18n.mjs          # puuttuvat suomennokset
+.venv/bin/python tests/smoke.py    # the web API end to end, throwaway database
+.venv/bin/python tests/api_v1.py   # API keys, /api/v1, previews and undo
+.venv/bin/python tests/history.py  # the sync script against a fake Firefox profile, the history API, ordering
+client/.venv/bin/python -m pytest -q client/tests   # stashai: search, agent, model connection, web, TUI
+node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
+node tools/check-i18n.mjs          # missing Finnish translations
 ```
 
-## Tietoturvasta lyhyesti
+## Security in brief
 
-- Istuntoeväste on `HttpOnly; Secure; SameSite=Lax`; jokainen muuttava API-kutsu vaatii `X-Stash`-otsakkeen (CSRF).
-- CSP sallii vain oman alkuperän skriptit ja tyylit; kirjanmerkkien osoitteista hyväksytään http(s), ftp, mailto ja tel.
-- Palvelimen tekemät haut selvittävät ensin kohteen IP:n ja kieltäytyvät sisäverkon/localhostin osoitteista.
-- Kirjanmerkkisovelma ja laajennus välittävät sivun tiedot URL:n `#`-osassa, joka ei päädy palvelimen lokeihin;
-  välityspalvelimen loki kannattaa kirjoittaa ilman kyselymerkkijonoja ja evästeitä.
+- The session cookie is `HttpOnly; Secure; SameSite=Lax`; every state-changing call of the web API needs the
+  `X-Stash` header (CSRF).
+- The CSP allows only same-origin scripts and styles; bookmark addresses may be http(s), ftp, mailto and tel.
+- Requests made by the server resolve the target first and refuse internal network and localhost addresses.
+- The bookmarklet and the extension pass page details in the URL's `#` part, which never reaches server logs;
+  configure the reverse proxy to log without query strings and cookies.
+- API keys and the browsing history belong to one account and are deleted with it.
