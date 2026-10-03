@@ -50,6 +50,8 @@ def test_usage_on_lines_search_and_history_tool(api):
     hist = agent.llm.calls[1][-1]["content"]
     assert "https://often.example/ | Often used, no bookmark | 30d 25" in hist and "NOT bookmarked" in hist
     assert "acme.example" not in hist
+    assert "Stash holds 3 different visited addresses (macbook: 3 rows, visits" in hist
+    assert "With the filters min_visits=5, period=90d, bookmarked=no: 1 match" in hist
     found = agent.llm.calls[2][-1]["content"]
     assert found.index("ACME documentation") < found.index("Pulla recipe"), "most used first"
 
