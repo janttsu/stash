@@ -21,10 +21,10 @@ from stashai.store import Store  # noqa: E402
 
 BOOKMARKS = [
     {"url": "https://acme.example/docs", "title": "ACME documentation", "tags": ["acme", "docs"]},
-    {"url": "https://www.acme.example/blog", "title": "ACME blog", "tags": ["acme"], "tab": "Työ", "category": "Asiakkaat"},
+    {"url": "https://www.acme.example/blog", "title": "ACME blog", "tags": ["acme"], "tab": "Work", "category": "Clients"},
     {"url": "https://support.acme.example/kb/12", "title": "Knowledge base: DNS", "tags": ["dns"]},
-    {"url": "https://news.example/acme-buys-widgets", "title": "Acme buys Widgets Inc", "tags": ["uutiset"]},
-    {"url": "https://recipes.example/pulla", "title": "Pulla recipe", "tags": ["ruoka"]},
+    {"url": "https://news.example/acme-buys-widgets", "title": "Acme buys Widgets Inc", "tags": ["news"]},
+    {"url": "https://recipes.example/buns", "title": "Bun recipe", "tags": ["food"]},
     {"url": "https://x.example/", "title": "X", "tags": []},
     {"url": "https://example.org/max", "title": "Maximum likelihood", "tags": ["ml"]},
 ]
@@ -89,8 +89,8 @@ def api(stash):
     con = db.connect()
     con.execute("DELETE FROM bookmarks")
     con.execute("DELETE FROM changesets")
-    con.execute("DELETE FROM categories WHERE name='Asiakkaat'")
-    con.execute("DELETE FROM tabs WHERE name='Työ'")
+    con.execute("DELETE FROM categories WHERE name='Clients'")
+    con.execute("DELETE FROM tabs WHERE name='Work'")
     con.close()
     client = StashAPI("https://stash.test", stash["key"])
     client.http = TestClient(stash["app"], base_url="http://testserver/api/v1",

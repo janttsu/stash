@@ -148,14 +148,14 @@ with TestClient(app):
     cat_ids = [c["id"] for c in tab["categories"]]
     extra = ok(W.post("/api/v1/changes", json={"ops": [
         {"op": "move", "ids": list(ids.values()), "category_id": cat_ids[0]},
-        {"op": "create", "url": "https://c2.example/", "title": "C2", "tab": tab["name"], "category": "Toinen"},
-        {"op": "create", "url": "https://c3.example/", "title": "C3", "tab": tab["name"], "category": "Kolmas"}]}))
+        {"op": "create", "url": "https://c2.example/", "title": "C2", "tab": tab["name"], "category": "Second"},
+        {"op": "create", "url": "https://c3.example/", "title": "C3", "tab": tab["name"], "category": "Third"}]}))
     tab = ok(R.get("/api/v1/structure"))["tabs"][0]
     order = lambda: [b["title"] for b in sorted(  # noqa: E731
         (b for b in ok(R.get("/api/v1/snapshot"))["bookmarks"] if b["category_id"] == cat_ids[0]),
         key=lambda b: b["position"])]
     assert order() == ["Mail", "Wiki", "Never visited"]
-    res = ok(W.post("/api/v1/changes", json={"summary": "järjestys", "ops": [
+    res = ok(W.post("/api/v1/changes", json={"summary": "order", "ops": [
         {"op": "order_bookmarks", "category_id": cat_ids[0], "ids": [ids["Never visited"], 999999]},
         {"op": "order_categories", "tab": tab["name"], "categories": [c["id"] for c in reversed(tab["categories"])]}]}))
     assert order() == ["Never visited", "Mail", "Wiki"]
