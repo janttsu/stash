@@ -97,8 +97,12 @@ def upload(source: str, body: Upload, c: KeyCtx = Depends(writer)):
 
 
 def sources(c: Ctx) -> list[dict]:
+    """Devices with their row count and the time span their history covers."""
     return [dict(r) for r in c.con.execute(
-        "SELECT source, browser, items, synced_at FROM history_sources WHERE user_id=? ORDER BY source", (c.uid,))]
+        "SELECT s.source, s.browser, s.items, s.synced_at,"
+        " (SELECT MIN(first_visit) FROM history h WHERE h.user_id=s.user_id AND h.source=s.source) AS first_visit,"
+        " (SELECT MAX(last_visit) FROM history h WHERE h.user_id=s.user_id AND h.source=s.source) AS last_visit"
+        " FROM history_sources s WHERE s.user_id=? ORDER BY s.source", (c.uid,))]
 
 
 def delete_source(c: Ctx, source: str) -> int:
@@ -170,7 +174,8 @@ def search(q: str = "", host: str = "", min_visits: int = Query(1, ge=0),
             continue
         items.append({k: r[k] for k in ("url", "title", "host", "visits", "visits_30d", "visits_90d", "visits_365d",
                                         "first_visit", "last_visit")} | {"bookmarks": ids})
-    return {"total": len(items), "items": items[offset:offset + limit]}
+    stored = c.con.execute("SELECT COUNT(DISTINCT url_key) FROM history WHERE user_id=?", (c.uid,)).fetchone()[0]
+    return {"total": len(items), "stored": stored, "items": items[offset:offset + limit]}
 
 
 # --- for the web UI -------------------------------------------------------------

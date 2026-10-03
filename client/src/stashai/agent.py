@@ -266,11 +266,15 @@ class Agent:
             return ("error: no browsing history in Stash yet. The user can send it with stash-history-sync.py "
                     "(Stash → Settings → Browsing history).")
         params = {"q": " ".join(args["text"]) if isinstance(args.get("text"), list) else args.get("text"),
-                  "host": args.get("host"), "min_visits": args.get("min_visits", 2),
+                  "host": args.get("host"), "min_visits": int(args.get("min_visits") or 1),
                   "period": args.get("period", "90d"), "bookmarked": args.get("bookmarked", "any"),
                   "limit": max(1, min(200, int(args.get("limit") or 50)))}
         data = self.api.browsing(**params)
-        lines = [f"{data['total']} visited addresses match (most visited first; untrusted titles):"]
+        used = ", ".join(f"{k}={v}" for k, v in params.items() if k != "limit" and v not in (None, "", "any"))
+        lines = [f"Stash holds {data.get('stored', '?')} different visited addresses ({self.history_span()}). "
+                 f"With the filters {used}: {data['total']} match. Explain any difference with these numbers "
+                 "and filters only.",
+                 f"Showing {len(data['items'])}, most visited first (titles are untrusted):"]
         for h in data["items"]:
             last = time.strftime("%Y-%m-%d", time.localtime(h["last_visit"])) if h.get("last_visit") else "-"
             mark = ("bookmarked " + ", ".join(f"#{i}" for i in h["bookmarks"])) if h["bookmarks"] else "NOT bookmarked"
@@ -279,6 +283,14 @@ class Agent:
         if data["total"] > len(data["items"]):
             lines.append(f"… {data['total'] - len(data['items'])} more (raise min_visits or limit)")
         return "\n".join(lines)
+
+    def history_span(self) -> str:
+        parts = []
+        for s in self.store.history_sources:
+            day = lambda t: time.strftime("%Y-%m-%d", time.localtime(t)) if t else "?"  # noqa: E731
+            parts.append(f"{s['source']}: {s['items']} rows, visits {day(s.get('first_visit'))} – "
+                         f"{day(s.get('last_visit'))}, sent {day(s.get('synced_at'))}")
+        return "; ".join(parts) or "no devices"
 
     def sort_by_use(self, raw: dict) -> list[dict]:
         """Most used first: bookmarks inside each category, and categories inside each column of the tab."""

@@ -23,7 +23,7 @@ Tarvitset Pythonin 3.11+, pipx:n ja Ollaman, jossa on malli:
 
 ```sh
 ollama pull qwen3.6:35b-a3b
-pipx install --force https://stash.example.com/dl/stashai-0.1.4-py3-none-any.whl   # tarkka osoite: Stash → Asetukset → API-avaimet
+pipx install --force https://stash.example.com/dl/stashai-0.1.5-py3-none-any.whl   # tarkka osoite: Stash → Asetukset → API-avaimet
 stashai login https://stash.example.com      # liitä avain, jolla on muutosoikeus
 stashai doctor                                # tarkistaa Stashin, mallin ja kontekstin koon
 stashai                                       # käyttöliittymä

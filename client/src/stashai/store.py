@@ -233,8 +233,9 @@ class Store:
         if len(self.tags) > max_tags:
             lines[-1] += f", … {len(self.tags) - max_tags} more"
         if self.history_sources:
-            srcs = ", ".join(f"{s['source']} ({time.strftime('%Y-%m-%d', time.localtime(s['synced_at'])) if s.get('synced_at') else '?'})"
-                             for s in self.history_sources)
+            day = lambda t: time.strftime("%Y-%m-%d", time.localtime(t)) if t else "?"  # noqa: E731
+            srcs = ", ".join(f"{s['source']} ({s['items']} addresses, visits {day(s.get('first_visit'))} – "
+                             f"{day(s.get('last_visit'))})" for s in self.history_sources)
             used = sum(1 for i in self.bookmarks if self.use(i)[0])
             lines.append(f"BROWSING HISTORY from {srcs}: {used} bookmarks visited in the last 90 days")
         lines.append("DASHBOARD (tab: categories with counts):")
