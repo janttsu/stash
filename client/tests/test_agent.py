@@ -167,3 +167,26 @@ def test_context_is_kept_small(api):
     agent.fit(messages)
     assert messages[2]["content"].endswith("[shortened: an older result]")
     assert messages[-1]["content"].endswith("y"), "the newest result stays whole"
+
+
+def test_small_sets_show_every_id_and_tag_each(api):
+    agent = make(api, [
+        step("search", label="untagged or acme", text=["acme", "x", "pulla"]),
+        step("propose", summary="tagit", ops=[{"op": "tag_each", "tags": {"999999": ["a"]}}]),
+        lambda m: step("propose", summary="Tagit jokaiselle", ops=[{"op": "tag_each", "tags": {
+            str(ids["X"]): ["sosiaalinen-media"], f"#{ids['Pulla recipe']}": "leivonta"}}]),
+    ])
+    ids = ids_by_title(agent.store)
+    out = agent.ask("ehdota tagit")
+    first = agent.llm.calls[1][-1]["content"]
+    assert all(f"#{ids[t]} " in first for t in ("X", "Pulla recipe", "ACME blog")), "every id is listed"
+    assert "… and" not in first
+    assert "tag_each: no bookmark #999999" in agent.llm.calls[2][-1]["content"]
+    diff = {e["id"]: e["tags"] for e in out.plan.preview["diff"]}
+    assert diff == {ids["X"]: [[], ["sosiaalinen-media"]], ids["Pulla recipe"]: [["ruoka"], ["leivonta", "ruoka"]]}
+
+
+def test_big_sets_say_how_to_get_the_rest(store):
+    many = list(store.bookmarks) * 10  # 70 lines
+    text = store.describe(many, name="S9")
+    assert text.count("\n#") == 15 and '… and 55 more: show {"set": "S9", "offset": 15}' in text

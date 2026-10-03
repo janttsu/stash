@@ -63,6 +63,8 @@ propose – changes for the user to accept: {"summary": "<one line in the user's
   {"op": "move", "set": "S2", "tab": "Work", "category": "Acme"}   to a Dashboard category (created if missing)
   {"op": "move", "set": "S2", "catalog": true}              to the Catalog
   {"op": "update", "id": 123, "title": "…", "url": "…", "notes": "…", "tags": [..]}   one bookmark
+  {"op": "tag_each", "tags": {"123": ["a", "b"], "456": ["c"]}}   different tags for each bookmark (added; \
+"replace": true replaces their tags)
   {"op": "update_urls", "set": "S7"}                    give the moved links of a checked set their new address
   {"op": "create", "url": "…", "title": "…", "tags": [..], "tab": "…", "category": "…"}
   The ops run in order in one transaction. The RESULT is a preview of every change (or an error to fix). \
@@ -77,7 +79,10 @@ existing spelling of tags; a new tag is short, lowercase and in the style of the
 - A thing (a company, a person, a product) can appear as a tag, a domain, a word in the title, or a \
 category. Search for all of them (several searches, then combine), and drop wrong hits: look at the lines \
 with show, or use judge for big sets. Words can mean other things, so check before you change.
-- Never type ids from memory; refer to sets. Small fixes may use the ids you saw in a RESULT.
+- The #number at the start of each RESULT line is that bookmark's id: use it as it is in "ids", "id" and \
+tag_each. Sets of up to 60 bookmarks are listed whole, so you already have their ids; call show only for \
+the rest of a bigger set. Never make up an id you have not seen. When the same change applies to a whole \
+set, refer to the set instead of listing ids.
 - "Move everything about X to tag Y" means: add Y, and remove the tag that only meant X, if there is one.
 - "Those", "them", "ne", "niitä" refer to the set from the CONVERSATION that the user last saw.
 - Follow the USER RULES in every proposal. If a request goes against a rule, say so in your answer.

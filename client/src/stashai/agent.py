@@ -21,7 +21,7 @@ from stashai.web import Web
 
 Emit = Callable[[str, str], None]
 SET_OPS = {"add_tags", "remove_tags", "set_tags", "delete", "move"}
-ALL_OPS = SET_OPS | {"rename_tag", "update", "create", "update_urls"}
+ALL_OPS = SET_OPS | {"rename_tag", "update", "create", "update_urls", "tag_each"}
 RESULT_CHARS = 6000
 # names models tend to use for search fields
 ALIASES = {"query": "text", "q": "text", "keywords": "text", "words": "text", "terms": "text", "tags": "tags_any",
@@ -173,7 +173,7 @@ class Agent:
                 hint = ""
                 if len(ids) > 200:
                     hint = f"\n(note: {len(ids)} is a lot; judge would take {len(ids) // self.judge_batch + 1} model calls)"
-                return f"{s.name} ({label}): {self.store.describe(ids)}{hint}"
+                return f"{s.name} ({label}): {self.store.describe(ids, name=s.name)}{hint}"
             if tool == "show":
                 ids = self.store.resolve(str(args.get("set", "")))
                 offset = max(0, int(args.get("offset") or 0))
@@ -198,7 +198,7 @@ class Agent:
                     return "error: how must be union, intersect or minus"
                 label = str(args.get("label") or f"{args.get('a')} {how} {args.get('b')}")
                 s = self.store.new_set(ids, label, f"combine {args.get('a')} {how} {args.get('b')}")
-                return f"{s.name} ({label}): {self.store.describe(ids)}"
+                return f"{s.name} ({label}): {self.store.describe(ids, name=s.name)}"
             if tool == "judge":
                 return self.judge(args, cancel, emit)
             if tool in ("fetch", "check", "web_search"):
@@ -244,10 +244,10 @@ class Agent:
                         unsure += batch
                         self.log(f"--- judge batch failed: {e}")
         yes = self.store.new_set(match, label, f"judge {name}: {question}")
-        out = f"{yes.name} (matches: {label}): {self.store.describe(match)}"
+        out = f"{yes.name} (matches: {label}): {self.store.describe(match, name=yes.name)}"
         if unsure:
             maybe = self.store.new_set(unsure, f"unsure: {label}", f"judge {name}: {question}")
-            out += f"\n\n{maybe.name} (unsure): {self.store.describe(unsure, sample=10)}"
+            out += f"\n\n{maybe.name} (unsure): {self.store.describe(unsure, sample=10, name=maybe.name)}"
         if failed:
             out += f"\n({failed} bookmarks could not be checked and are in the unsure set)"
         return out + f"\n{len(ids) - len(match) - len(set(unsure))} of {len(ids)} were a clear no."
@@ -340,6 +340,18 @@ class Agent:
         for raw in written:
             if not isinstance(raw, dict) or raw.get("op") not in ALL_OPS:
                 raise ValueError(f"unknown op {raw!r}; ops are {', '.join(sorted(ALL_OPS))}")
+            if raw["op"] == "tag_each":
+                mapping = raw.get("tags")
+                if not isinstance(mapping, dict) or not mapping:
+                    raise ValueError('tag_each needs "tags": {"<id>": ["tag", …], …}')
+                for key, tags in mapping.items():
+                    bid = self._ints([key])
+                    if not bid or bid[0] not in self.store.bookmarks:
+                        raise ValueError(f"tag_each: no bookmark #{key}; use ids from the RESULT lines")
+                    tags = [tags] if isinstance(tags, str) else list(tags or [])
+                    if tags:
+                        ops.append({"op": "set_tags" if raw.get("replace") else "add_tags", "ids": bid, "tags": tags})
+                continue
             if raw["op"] == "update_urls":
                 ids = self.store.resolve(str(raw.get("set", ""))) if raw.get("set") else self._ints(raw.get("ids"))
                 found = [i for i in ids if i in self.moved_to]

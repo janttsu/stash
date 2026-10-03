@@ -170,7 +170,9 @@ class Store:
             parts.append("notes: " + " ".join(b.notes.split())[:100])
         return " | ".join(parts)
 
-    def describe(self, ids: list[int], *, sample: int = 15) -> str:
+    def describe(self, ids: list[int], *, sample: int = 15, whole: int = 60, name: str = "") -> str:
+        """Size, tags, sites and places of a set, then its lines: all of them when there are at most
+        *whole*, so the model has every id at hand without asking for them."""
         if not ids:
             return "0 bookmarks"
         tags = Counter(t for i in ids for t in self.bookmarks[i].tags)
@@ -181,9 +183,12 @@ class Store:
                "tags: " + ", ".join(f"{t} {n}" for t, n in tags.most_common(12)) + (f"; untagged {untagged}" if untagged else ""),
                "sites: " + ", ".join(f"{h} {n}" for h, n in hosts.most_common(8)),
                "places: " + ", ".join(f"{p} {n}" for p, n in places.most_common(6))]
-        out += [self.line(i) for i in ids[:sample]]
-        if len(ids) > sample:
-            out.append(f"… and {len(ids) - sample} more")
+        shown = len(ids) if len(ids) <= whole else sample
+        out += [self.line(i) for i in ids[:shown]]
+        if len(ids) > shown:
+            ref = name or "the set"
+            out.append(f"… and {len(ids) - shown} more: show {{\"set\": \"{ref}\", \"offset\": {shown}}} lists them "
+                       "with their ids (only needed if you must act on them one by one)")
         return "\n".join(out)
 
     def overview(self, *, max_tags: int = 400) -> str:
