@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Add to Stash",
+  "version": "1.0.0",
+  "description": "Save the current page, a link or all open tabs to your Stash bookmarks.",
+  "permissions": ["activeTab", "tabs", "contextMenus"],
+  "action": { "default_title": "Add to Stash", "default_icon": { "128": "icon-128.png" } },
+  "icons": { "128": "icon-128.png" },
+  "background": { "service_worker": "background.js", "scripts": ["config.js", "background.js"] },
+  "browser_specific_settings": { "gecko": { "id": "add-to-stash@stash.local", "strict_min_version": "121.0" } }
+}
