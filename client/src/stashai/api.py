@@ -72,6 +72,14 @@ class StashAPI:
     def changes(self, ops: list[dict], summary: str, *, dry_run: bool) -> dict:
         return self._call("POST", "/changes", json={"ops": ops, "summary": summary[:500], "dry_run": dry_run})
 
+    def usage(self) -> dict:
+        """{"usage": {bookmark id: visit counts}, "sources": [...]} from the browsing history."""
+        return self._call("GET", "/history/usage")
+
+    def browsing(self, **params) -> dict:
+        """Visited addresses (all devices), most visited first."""
+        return self._call("GET", "/history", params={k: v for k, v in params.items() if v not in (None, "")})
+
     def history(self, limit: int = 20) -> list[dict]:
         return self._call("GET", "/changes", params={"limit": limit})["changes"]
 

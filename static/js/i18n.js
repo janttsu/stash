@@ -353,6 +353,17 @@ export const FI = {
   "Change": "Muutos",
   "Nothing yet.": "Ei vielä mitään.",
   "The same command also replaces an older version. Versions 0.1.1 and newer update themselves with “stashai update”.": "Sama komento korvaa myös vanhemman version. Versiot 0.1.1 ja uudemmat päivittyvät komennolla ”stashai update”.",
+  // browsing history
+  "Browsing history": "Selaushistoria",
+  "Your computers can send their Firefox history here. stashai then sees which bookmarks you really use: it can bring the most used ones to the Dashboard, put them first, and find often visited pages that are not bookmarked yet. The history stays on this server, is never part of the export and can be deleted here at any time.": "Tietokoneesi voivat lähettää Firefoxin historian tänne. Silloin stashai näkee, mitä kirjanmerkkejä oikeasti käytät: se voi tuoda käytetyimmät työpöydälle, järjestää ne ensimmäisiksi ja löytää usein käytetyt sivut, joita ei ole vielä tallennettu. Historia pysyy tällä palvelimella, ei kuulu vientiin ja sen voi poistaa täältä milloin tahansa.",
+  "Computer": "Tietokone",
+  "Browser": "Selain",
+  "Addresses": "Osoitteita",
+  "Last sync": "Viimeksi lähetetty",
+  "Delete the history sent by {name}? A scheduled sync sends it again unless you stop it on that computer.": "Poistetaanko koneen {name} lähettämä historia? Ajastettu lähetys lähettää sen uudelleen, ellet pysäytä sitä kyseisellä koneella.",
+  "No history yet.": "Historiaa ei ole vielä lähetetty.",
+  "Sending the history (macOS or Linux)": "Historian lähettäminen (macOS tai Linux)",
+  "Run these in a terminal on the computer where you use Firefox. The script needs only the Python 3 of the system and an API key that can change. It sends every few hours; --dry-run shows what would be sent, --forget deletes it from here.": "Aja nämä päätteessä koneella, jolla käytät Firefoxia. Skripti tarvitsee vain järjestelmän Python 3:n ja API-avaimen, jolla on muutosoikeus. Se lähettää historian muutaman tunnin välein; --dry-run näyttää mitä lähetettäisiin, --forget poistaa sen täältä.",
 };
 
 let lang = 'en';

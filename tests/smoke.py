@@ -193,7 +193,7 @@ with TestClient(app):  # runs startup (schema creation)
             <DT><A HREF="https://b.example/x?y=1&amp;z=2" ADD_DATE="1600000001000" TAGS="one,Two">B</A>
             <DD>a note
             <DT><A HREF="javascript:void(0)">bookmarklet</A>
-            <DT><A HREF="https://dupe.example/" NOTES="ninja note" TAGS="x, y">Ninja style</A>
+            <DT><A HREF="https://dupe.example/" NOTES="attribute note" TAGS="x, y">Notes attribute</A>
             <DT><A HREF="place:sort=8">Most visited</A>
         </DL><p>
     </DL><p>
@@ -205,7 +205,7 @@ with TestClient(app):  # runs startup (schema creation)
     got = {i["url"]: i for i in ok(b.get("/api/bookmarks", params={"scope": "catalog", "q": ".example/"}))["items"]}
     bx = got["https://b.example/x?y=1&z=2"]
     assert bx["tags"] == ["bookmarks bar", "dev tools", "one", "two"] and bx["notes"] == "a note"
-    assert got["https://dupe.example/"]["notes"] == "ninja note" and got["https://dupe.example/"]["tags"][-2:] == ["x", "y"]
+    assert got["https://dupe.example/"]["notes"] == "attribute note" and got["https://dupe.example/"]["tags"][-2:] == ["x", "y"]
     assert bx["created_at"] == 1600000001 and got["https://a.example/"]["title"] == "A & co"
     stats = ok(b.post("/api/import", params={"mode": "tab", "tab_name": "Imp", "skip_duplicates": "false"},
                       content=browser_file.encode()))

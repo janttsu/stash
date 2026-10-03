@@ -21,7 +21,8 @@ from stashai.web import Web
 
 Emit = Callable[[str, str], None]
 SET_OPS = {"add_tags", "remove_tags", "set_tags", "delete", "move"}
-ALL_OPS = SET_OPS | {"rename_tag", "update", "create", "update_urls", "tag_each"}
+ALL_OPS = SET_OPS | {"rename_tag", "update", "create", "update_urls", "tag_each", "order_bookmarks",
+                     "order_categories", "sort_by_use"}
 RESULT_CHARS = 6000
 # names models tend to use for search fields
 ALIASES = {"query": "text", "q": "text", "keywords": "text", "words": "text", "terms": "text", "tags": "tags_any",
@@ -70,6 +71,10 @@ class Agent:
 
     def refresh(self) -> None:
         self.store.load(self.api.snapshot())
+        try:
+            self.store.load_usage(self.api.usage())
+        except StashError:  # an older Stash without history: everything else still works
+            self.store.load_usage({})
 
     def check_context(self) -> str:
         """Make sure the model gets a context big enough for the overview and a few tool results."""
@@ -201,6 +206,8 @@ class Agent:
                 return f"{s.name} ({label}): {self.store.describe(ids, name=s.name)}"
             if tool == "judge":
                 return self.judge(args, cancel, emit)
+            if tool == "history":
+                return self.tool_history(args)
             if tool in ("fetch", "check", "web_search"):
                 if self.web is None:
                     return "error: web access is turned off ([web] enabled = false in the config)"
@@ -251,6 +258,54 @@ class Agent:
         if failed:
             out += f"\n({failed} bookmarks could not be checked and are in the unsure set)"
         return out + f"\n{len(ids) - len(match) - len(set(unsure))} of {len(ids)} were a clear no."
+
+    # --- browsing history ------------------------------------------------------------
+
+    def tool_history(self, args: dict) -> str:
+        if not self.store.history_sources:
+            return ("error: no browsing history in Stash yet. The user can send it with stash-history-sync.py "
+                    "(Stash → Settings → Browsing history).")
+        params = {"q": " ".join(args["text"]) if isinstance(args.get("text"), list) else args.get("text"),
+                  "host": args.get("host"), "min_visits": args.get("min_visits", 2),
+                  "period": args.get("period", "90d"), "bookmarked": args.get("bookmarked", "any"),
+                  "limit": max(1, min(200, int(args.get("limit") or 50)))}
+        data = self.api.browsing(**params)
+        lines = [f"{data['total']} visited addresses match (most visited first; untrusted titles):"]
+        for h in data["items"]:
+            last = time.strftime("%Y-%m-%d", time.localtime(h["last_visit"])) if h.get("last_visit") else "-"
+            mark = ("bookmarked " + ", ".join(f"#{i}" for i in h["bookmarks"])) if h["bookmarks"] else "NOT bookmarked"
+            lines.append(f"{h['url'][:150]} | {(h['title'] or '')[:80]} | 30d {h['visits_30d']}, 90d {h['visits_90d']}, "
+                         f"all {h['visits']}, last {last} | {mark}")
+        if data["total"] > len(data["items"]):
+            lines.append(f"… {data['total'] - len(data['items'])} more (raise min_visits or limit)")
+        return "\n".join(lines)
+
+    def sort_by_use(self, raw: dict) -> list[dict]:
+        """Most used first: bookmarks inside each category, and categories inside each column of the tab."""
+        if not self.store.history_sources:
+            raise ValueError("sort_by_use needs browsing history, and Stash has none yet")
+        tabs = [t for t in self.store.tabs if not raw.get("tab") or t["name"].casefold() == str(raw["tab"]).casefold()]
+        if not tabs:
+            raise ValueError(f"no tab named {raw.get('tab')!r}")
+        ops = []
+        for tab in tabs:
+            cats = [c for c in tab["categories"]
+                    if not raw.get("category") or c["name"].casefold() == str(raw["category"]).casefold()]
+            if raw.get("category") and not cats:
+                raise ValueError(f"no category {raw['category']!r} on the tab {tab['name']!r}")
+            score = {}
+            for c in cats:
+                members = sorted((b for b in self.store.bookmarks.values() if b.category_id == c["id"]),
+                                 key=lambda b: b.position)
+                ranked = sorted(members, key=lambda b: self.store.use(b.id), reverse=True)  # stable: ties keep order
+                if [b.id for b in ranked] != [b.id for b in members]:
+                    ops.append({"op": "order_bookmarks", "category_id": c["id"], "ids": [b.id for b in ranked]})
+                score[c["id"]] = tuple(map(sum, zip(*(self.store.use(b.id) for b in members)))) if members else (0, 0, 0)
+            if not raw.get("category") and raw.get("categories", True):
+                order = sorted(tab["categories"], key=lambda c: (score.get(c["id"], (0, 0, 0)), -c["position"]),
+                               reverse=True)
+                ops.append({"op": "order_categories", "tab": tab["name"], "categories": [c["id"] for c in order]})
+        return ops
 
     # --- the web ---------------------------------------------------------------------
 
@@ -340,6 +395,11 @@ class Agent:
         for raw in written:
             if not isinstance(raw, dict) or raw.get("op") not in ALL_OPS:
                 raise ValueError(f"unknown op {raw!r}; ops are {', '.join(sorted(ALL_OPS))}")
+            if raw["op"] == "sort_by_use":
+                ops += self.sort_by_use(raw)
+                continue
+            if raw["op"] == "order_bookmarks" and raw.get("set"):
+                raw = {**raw, "ids": self.store.resolve(str(raw["set"]))}
             if raw["op"] == "tag_each":
                 mapping = raw.get("tags")
                 if not isinstance(mapping, dict) or not mapping:

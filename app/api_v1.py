@@ -80,7 +80,7 @@ def locations(con, uid: int) -> dict[int, tuple[str, str]]:
 def item_json(row, tags, where) -> dict:
     tab, cat = where.get(row["category_id"], ("", "")) if row["category_id"] else ("", "")
     return {"id": row["id"], "url": row["url"], "title": row["title"], "notes": row["notes"], "host": row["host"],
-            "tags": tags, "category_id": row["category_id"], "tab": tab, "category": cat,
+            "tags": tags, "category_id": row["category_id"], "tab": tab, "category": cat, "position": row["position"],
             "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
 
@@ -89,10 +89,11 @@ def structure(con, uid: int) -> list[dict]:
         "SELECT category_id, COUNT(*) FROM bookmarks WHERE user_id=? AND category_id IS NOT NULL GROUP BY 1", (uid,))}
     tabs = []
     for t in con.execute("SELECT id, name FROM tabs WHERE user_id=? ORDER BY position, id", (uid,)).fetchall():
-        cats = con.execute("SELECT id, name FROM categories WHERE tab_id=? ORDER BY col, position, id",
+        cats = con.execute("SELECT id, name, col, position FROM categories WHERE tab_id=? ORDER BY col, position, id",
                            (t["id"],)).fetchall()
         tabs.append({"id": t["id"], "name": t["name"],
-                     "categories": [{"id": k["id"], "name": k["name"], "count": counts.get(k["id"], 0)} for k in cats]})
+                     "categories": [{"id": k["id"], "name": k["name"], "count": counts.get(k["id"], 0), "col": k["col"],
+                                     "position": k["position"]} for k in cats]})
     return tabs
 
 
@@ -154,7 +155,8 @@ def get_structure(c: KeyCtx = Depends(key_ctx)):
 # --- changes -------------------------------------------------------------------
 
 class Op(BaseModel):
-    op: Literal["add_tags", "remove_tags", "set_tags", "rename_tag", "delete", "move", "update", "create"]
+    op: Literal["add_tags", "remove_tags", "set_tags", "rename_tag", "delete", "move", "update", "create",
+                "order_bookmarks", "order_categories"]
     ids: list[int] = Field([], max_length=MAX_BOOKMARKS)
     tags: list[str] = Field([], max_length=100)
     old: str = Field("", max_length=100)       # rename_tag
@@ -171,6 +173,8 @@ class Op(BaseModel):
     notes: Optional[str] = Field(None, max_length=5000)
     color: Optional[str] = None
     skip_existing: bool = True                 # create: skip a URL that is already bookmarked
+    # order_categories: the tab's categories (ids) in the wanted order; each column keeps its categories
+    categories: list[int] = Field([], max_length=MAX_BOOKMARKS)
 
 
 class Changes(BaseModel):
@@ -200,6 +204,7 @@ class Runner:
         self.created_categories: list[int] = []
         self.created_tabs: list[int] = []
         self.skipped: list[dict] = []
+        self.categories_before: dict[int, dict] = {}   # category id -> {tab_id, col, position} before
 
     def remember(self, ids) -> None:
         fresh = [i for i in ids if i not in self.before]
@@ -215,8 +220,8 @@ class Runner:
             self.skipped.append({"reason": "not_found", "ids": missing[:50], "count": len(missing)})
         return [i for i in dict.fromkeys(ids) if i in found]
 
-    def target(self, op: Op) -> Optional[int]:
-        """Category id for move/create; None = the Catalog."""
+    def target(self, op: Op, create: bool = True) -> Optional[int]:
+        """Category id for move/create; None = the Catalog. Missing ones are created unless *create* is False."""
         if op.catalog:
             return None
         if op.category_id is not None:
@@ -228,6 +233,8 @@ class Runner:
         tab = self.con.execute("SELECT id FROM tabs WHERE user_id=? AND lower(name)=lower(?)",
                                (self.c.uid, tab_name)).fetchone()
         tab_id = tab[0] if tab else None
+        if tab_id is None and not create:
+            raise err(404, "not_found")
         if tab_id is None:
             tab_id = new_tab(self.con, self.c.uid, tab_name)
             self.created_tabs.append(tab_id)
@@ -235,6 +242,8 @@ class Runner:
                                (tab_id, cat_name)).fetchone()
         if cat:
             return cat[0]
+        if not create:
+            raise err(404, "not_found")
         cat_id = new_category(self.con, self.c.uid, tab_id, cat_name)
         self.created_categories.append(cat_id)
         return cat_id
@@ -301,6 +310,37 @@ class Runner:
                     set_tags(con, op.id, norm_tags(op.tags))
                 con.execute("UPDATE bookmarks SET updated_at=? WHERE id=?", (db.now(), op.id))
                 db.reindex(con, ids)
+        elif op.op == "order_bookmarks":
+            # the given bookmarks first, in that order; the category's other bookmarks keep their order after them
+            category_id = self.target(op, create=False)
+            if category_id is None:
+                raise err(422, "category_required")
+            current = [r[0] for r in con.execute(
+                "SELECT id FROM bookmarks WHERE category_id=? ORDER BY position, id", (category_id,))]
+            wanted = [i for i in dict.fromkeys(op.ids) if i in set(current)]
+            if len(wanted) < len(set(op.ids)):
+                self.skipped.append({"reason": "not_in_category", "count": len(set(op.ids)) - len(wanted)})
+            order = wanted + [i for i in current if i not in set(wanted)]
+            info["matched"] = len(wanted)
+            self.remember(order)
+            con.executemany("UPDATE bookmarks SET position=? WHERE id=?", [(n, b) for n, b in enumerate(order)])
+        elif op.op == "order_categories":
+            tab_name = clean_text(op.tab, 100)
+            tab = con.execute("SELECT id FROM tabs WHERE user_id=? AND lower(name)=lower(?)", (uid, tab_name)).fetchone()
+            if not tab:
+                raise err(404, "not_found")
+            cats = con.execute("SELECT id, tab_id, col, position FROM categories WHERE tab_id=? ORDER BY col, position, id",
+                               (tab[0],)).fetchall()
+            rank = {cid: n for n, cid in enumerate(dict.fromkeys(op.categories))}
+            info["matched"] = sum(1 for k in cats if k["id"] in rank)
+            for k in cats:
+                self.categories_before.setdefault(k["id"], {"tab_id": k["tab_id"], "col": k["col"],
+                                                            "position": k["position"]})
+            for col in sorted({k["col"] for k in cats}):
+                column = [k for k in cats if k["col"] == col]
+                column.sort(key=lambda k: (rank.get(k["id"], len(rank)), k["position"], k["id"]))
+                con.executemany("UPDATE categories SET position=? WHERE id=?",
+                                [(n, k["id"]) for n, k in enumerate(column)])
         else:  # create
             url = clean_url(op.url or "")
             existing = con.execute("SELECT id FROM bookmarks WHERE user_id=? AND url=?", (uid, url)).fetchone()
@@ -359,6 +399,9 @@ def make_diff(before: dict[int, Optional[dict]], after: dict[int, dict], where_b
             if old["category_id"] != new["category_id"]:
                 entry["location"] = [where_text(old, where_before), where_text(new, where_after)]
                 changed = True
+            elif old["position"] != new["position"] and new["category_id"] is not None:
+                entry["position"] = [old["position"] + 1, new["position"] + 1]
+                changed = True
             if not changed:
                 counts["unchanged"] += 1
                 continue
@@ -380,15 +423,19 @@ def apply_changes(c: Ctx, body: Changes, key_name: str) -> dict:
         results = [runner.run(op) for op in body.ops]
         after = rows_state(con, list(runner.before))
         diff, counts = make_diff(runner.before, after, where_before, locations(con, c.uid))
+        moved_categories = category_diff(con, runner.categories_before, where_before)
         out = {"dry_run": body.dry_run, "ops": results, "counts": counts, "diff": diff, "skipped": runner.skipped,
-               "created_tabs": runner.created_tabs, "created_categories": runner.created_categories}
-        if body.dry_run or not diff and not runner.created_categories:
+               "created_tabs": runner.created_tabs, "created_categories": runner.created_categories,
+               "categories": moved_categories}
+        if body.dry_run or not diff and not runner.created_categories and not moved_categories:
             con.execute("ROLLBACK")
             out["changeset"] = None
             return out
         stored = {"counts": counts, "created_tabs": runner.created_tabs,
                   "created_categories": runner.created_categories,
-                  "created_ids": [i for i, v in runner.before.items() if v is None]}
+                  "created_ids": [i for i, v in runner.before.items() if v is None],
+                  "categories_before": {str(k): v for k, v in runner.categories_before.items()},
+                  "categories_moved": len(moved_categories)}
         before = {str(i): v for i, v in runner.before.items() if v is not None}
         out["changeset"] = con.execute(
             "INSERT INTO changesets(user_id, key_name, summary, ops, result, before, created_at) VALUES(?,?,?,?,?,?,?)",
@@ -404,6 +451,17 @@ def apply_changes(c: Ctx, body: Changes, key_name: str) -> dict:
         if con.in_transaction:
             con.execute("ROLLBACK")
         raise
+
+
+def category_diff(con, before: dict[int, dict], where: dict) -> list[dict]:
+    out = []
+    for cid, old in before.items():
+        row = con.execute("SELECT col, position FROM categories WHERE id=?", (cid,)).fetchone()
+        if row and (row["col"], row["position"]) != (old["col"], old["position"]):
+            tab, name = where.get(cid, ("?", "?"))
+            out.append({"id": cid, "tab": tab, "category": name, "column": row["col"] + 1,
+                        "position": [old["position"] + 1, row["position"] + 1]})
+    return sorted(out, key=lambda e: (e["tab"], e["column"], e["position"][1]))
 
 
 def touched(cs) -> set[int]:
@@ -459,6 +517,9 @@ def undo_changeset(c: Ctx, cs_id: int, force: bool) -> dict:
         for tab_id in result.get("created_tabs", []):
             if not con.execute("SELECT 1 FROM categories WHERE tab_id=?", (tab_id,)).fetchone():
                 con.execute("DELETE FROM tabs WHERE id=? AND user_id=?", (tab_id, c.uid))
+        for cid, old in result.get("categories_before", {}).items():
+            con.execute("UPDATE categories SET tab_id=?, col=?, position=? WHERE id=? AND user_id=?",
+                        (old["tab_id"], old["col"], old["position"], int(cid), c.uid))
         con.execute("UPDATE changesets SET undone_at=? WHERE id=?", (db.now(), cs_id))
     return {"restored": restored, "removed": removed}
 
