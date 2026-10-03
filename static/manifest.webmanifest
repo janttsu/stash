@@ -1,0 +1,9 @@
+{
+  "name": "Stash",
+  "short_name": "Stash",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f6f8",
+  "theme_color": "#2f6fed",
+  "icons": [{ "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
