@@ -160,6 +160,25 @@ class LLM:
             r = h.get(self.base + "/v1/models")
             return [m["id"] for m in r.json().get("data", [])]
 
+    def model_details(self) -> list[dict]:
+        """Every model the server has: name, size in GB, parameters, quantization, whether it is loaded now."""
+        if not self.is_ollama():
+            return [{"name": n, "size_gb": None, "params": "", "quant": "", "loaded": False} for n in self.models()]
+        with self._http(8) as h:
+            tags = h.get(self.base + "/api/tags").json().get("models", [])
+            try:
+                loaded = {m.get("name") for m in h.get(self.base + "/api/ps").json().get("models", [])}
+            except (httpx.HTTPError, ValueError):
+                loaded = set()
+        out = []
+        for m in tags:
+            name = m.get("name") or m.get("model") or ""
+            d = m.get("details") or {}
+            out.append({"name": name, "size_gb": round((m.get("size") or 0) / 1e9, 1) or None,
+                        "params": d.get("parameter_size", ""), "quant": d.get("quantization_level", ""),
+                        "loaded": name in loaded})
+        return sorted(out, key=lambda m: m["name"])
+
     def context_length(self) -> int | None:
         """The context the model runs with: num_ctx if set, else what the server loaded it with."""
         if self.num_ctx:

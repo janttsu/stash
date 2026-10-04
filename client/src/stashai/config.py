@@ -64,6 +64,7 @@ class Config:
     web_search: str = "duckduckgo"   # "duckduckgo", the address of a SearXNG instance, or "off"
     web_private: bool = False     # also fetch addresses in the local network (192.168.x, 10.x, VPN)
     timeout: float = 900.0
+    model_chosen: bool = False    # the model was given with --model (or STASHAI_MODEL): do not ask for one
     rules_path: Path = field(default_factory=lambda: config_dir() / "rules.md")
     path: Path = field(default_factory=lambda: config_dir() / "config.toml")
 
@@ -104,8 +105,25 @@ def load(path: Path | None = None) -> Config:
     # the environment wins, so a key never has to be written to disk
     cfg.stash_url = os.environ.get("STASHAI_URL", cfg.stash_url).rstrip("/")
     cfg.api_key = os.environ.get("STASHAI_KEY", cfg.api_key)
-    cfg.model = os.environ.get("STASHAI_MODEL", cfg.model)
+    if os.environ.get("STASHAI_MODEL"):
+        cfg.model, cfg.model_chosen = os.environ["STASHAI_MODEL"], True
     return cfg
+
+
+def last_model() -> str:
+    """The model chosen in the previous session, offered first next time."""
+    try:
+        return (state_dir() / "last-model").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def remember_model(name: str) -> None:
+    try:
+        state_dir().mkdir(parents=True, exist_ok=True)
+        (state_dir() / "last-model").write_text(name + "\n", encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _q(value: str) -> str:

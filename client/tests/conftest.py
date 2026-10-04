@@ -62,6 +62,10 @@ class FakeLLM:
     def context_length(self):
         return 32768
 
+    def model_details(self):
+        return [{"name": n, "size_gb": g, "params": "", "quant": "", "loaded": False}
+                for n, g in (("fake", 1.0), ("qwen3.6:35b-a3b", 23.9), ("small:9b", 6.6))]
+
     def health(self):
         return True, "fake"
 

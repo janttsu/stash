@@ -25,10 +25,11 @@ You need Python 3.11+, pipx and Ollama with the model:
 
 ```sh
 ollama pull qwen3.6:35b-a3b
-pipx install --force https://stash.example.com/dl/stashai-0.1.5-py3-none-any.whl   # exact address: Stash → Settings → API keys
+pipx install --force https://stash.example.com/dl/stashai-0.1.6-py3-none-any.whl   # exact address: Stash → Settings → API keys
 stashai login https://stash.example.com      # paste a key that can change
 stashai doctor                                # checks Stash, the model and the context size
-stashai                                       # the terminal UI
+stashai                                       # the terminal UI: first asks which local model to use
+stashai -m qwen3.6:35b-a3b                    # the terminal UI with this model, without asking
 stashai update                                # installs the newest version (served by your Stash)
 ```
 
@@ -43,13 +44,17 @@ Get an API key from Stash: Settings → API keys → Create API key. It is saved
 
 ## Using it
 
+- At start, stashai lists every model your Ollama has (size, parameters, which one is loaded) and asks which
+  one to use; the one you chose last time is highlighted. `-m NAME` (or `STASHAI_MODEL`) skips the question,
+  and `/model` changes the model later.
 - On the left: the conversation and the model's steps. On the right: results and proposals.
 - A proposal shows every change (tags +/-, moves, new order, deletions). **y** or an empty Enter applies it,
   **n** rejects it, or write a correction instead ("don't delete the ones tagged x").
 - **Esc** stops the model, **PgUp/PgDn** scroll the right pane, **F1** help, **Ctrl+Q** quits.
 - Commands: `/undo [ID] [force]`, `/history`, `/sets`, `/show S3`, `/refresh`, `/new`, `/rules`, `/model NAME`.
 
-Without the UI: `stashai ask "request"` (asks before changing anything; `--yes` applies right away),
+Without the UI: `stashai ask "request" [-m MODEL]` (the model from the config unless given; asks before
+changing anything; `--yes` applies right away),
 `stashai history`, `stashai undo [ID]`.
 
 ### Your own rules
