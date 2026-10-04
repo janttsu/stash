@@ -305,6 +305,7 @@ export const FI = {
   'This permanently deletes your account and all your bookmarks. Export them first if you want a copy.': 'Tämä poistaa tilisi ja kaikki kirjanmerkkisi pysyvästi. Vie ne ensin, jos haluat kopion.',
   'Users and registration': 'Käyttäjät ja rekisteröityminen',
   'Who can create an account': 'Kuka voi luoda tilin',
+  'This is set by the server configuration (STASH_REGISTRATION).': 'Tämä on asetettu palvelimen asetuksissa (STASH_REGISTRATION).',
   'Only people with an invitation link': 'Vain kutsulinkin saaneet',
   'Anyone': 'Kuka tahansa',
   'Nobody': 'Ei kukaan',
