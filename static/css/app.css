@@ -285,7 +285,8 @@ img.fav { background: var(--fav-plate, transparent); }
 .tabs__more { flex: none; }
 
 .dash__tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-.dash__search { flex: 1 1 220px; max-width: 420px; margin-right: auto; }
+.dash__search { flex: 1 1 220px; min-width: 0; max-width: 420px; margin-right: auto; }
+@media (max-width: 600px) { .dash__search { flex-basis: 100%; max-width: none; margin-right: 0; } }
 
 .columns { display: grid; gap: 14px; align-items: start; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); }
 .columns[data-cols="1"] { --cols: 1; }

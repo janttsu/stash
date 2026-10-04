@@ -21,8 +21,9 @@ you get real use out of your browsing history without handing it to anyone.
    - **Dashboard**: tabs with categories in columns and bookmarks inside them, arranged by dragging.
    - **Catalog**: a tagged store with fast search.
    - Import and export as a browser bookmarks file, sharing a tab by link, finding duplicates and dead links,
-     a bookmarklet, a browser extension, two-factor authentication, invitation-based registration, English
-     and Finnish.
+     a bookmarklet, a browser extension, two-factor authentication and invitation-based registration.
+   - The web UI and the browser extension speak **English, Finnish and Swedish** (Settings → Language, or the
+     browser's language).
    - **API** (`/api/v1`) with API keys: all bookmarks at once, search, and changes with exact previews.
      Every change can be undone.
 2. **stashai** (`client/`): a Linux terminal program you give instructions in plain language ("move
@@ -134,9 +135,16 @@ python3 ~/stash-history-sync.py --schedule    # sends every 6 hours (launchd / c
 .venv/bin/python tests/history.py  # the sync script against a fake Firefox profile, the history API, ordering
 client/.venv/bin/python -m pytest -q client/tests   # stashai: search, agent, model connection, web, TUI
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
-node tools/check-i18n.mjs          # missing Finnish translations
+node tools/check-i18n.mjs          # missing or broken Finnish and Swedish translations
 node tools/screenshots.mjs         # the README screenshots, from a demo instance on port 8014
 ```
+
+## Languages
+
+UI strings are written in English in the code (`t('…')`); `static/js/i18n.js` maps them to Finnish and
+`static/js/i18n-sv.js` to Swedish, and `extension/_locales/` holds the extension's texts. A new string needs
+both translations, which `node tools/check-i18n.mjs` checks (placeholders such as `{n}` included). The
+repository, the API, stashai and the scripts are in English only.
 
 ## Security in brief
 

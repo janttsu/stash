@@ -43,6 +43,7 @@ async function boot() {
     return undefined;
   }
   setLang(state.user.settings.lang);
+  document.title = t('Add to Stash');
   applyTheme(state.user.settings.theme);
   await loadDash();
   const batch = readBatch();

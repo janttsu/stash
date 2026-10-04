@@ -13,9 +13,9 @@ const single = (url, title) => openAdd(`#${new URLSearchParams({ url: url || '',
 ext.action.onClicked.addListener((tab) => single(tab.url, tab.title));
 
 ext.runtime.onInstalled.addListener(() => {
-  ext.contextMenus.create({ id: 'page', title: 'Add page to Stash', contexts: ['page'] });
-  ext.contextMenus.create({ id: 'link', title: 'Add link to Stash', contexts: ['link'] });
-  ext.contextMenus.create({ id: 'all', title: 'Bookmark all open tabs', contexts: ['action'] });
+  ext.contextMenus.create({ id: 'page', title: ext.i18n.getMessage('menuPage'), contexts: ['page'] });
+  ext.contextMenus.create({ id: 'link', title: ext.i18n.getMessage('menuLink'), contexts: ['link'] });
+  ext.contextMenus.create({ id: 'all', title: ext.i18n.getMessage('menuAll'), contexts: ['action'] });
 });
 
 ext.contextMenus.onClicked.addListener(async (info, tab) => {

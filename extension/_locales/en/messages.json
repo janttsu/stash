@@ -1,0 +1,17 @@
+{
+  "extName": {
+    "message": "Add to Stash"
+  },
+  "extDescription": {
+    "message": "Save the current page, a link or all open tabs to your Stash bookmarks."
+  },
+  "menuPage": {
+    "message": "Add page to Stash"
+  },
+  "menuLink": {
+    "message": "Add link to Stash"
+  },
+  "menuAll": {
+    "message": "Bookmark all open tabs"
+  }
+}
