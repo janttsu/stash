@@ -25,7 +25,7 @@ You need Python 3.11+, pipx and Ollama with the model:
 
 ```sh
 ollama pull qwen3.6:35b-a3b
-pipx install --force https://stash.example.com/dl/stashai-0.1.7-py3-none-any.whl   # exact address: Stash → Settings → API keys
+pipx install --force https://stash.example.com/dl/stashai-0.1.8-py3-none-any.whl   # exact address: Stash → Settings → API keys
 stashai login https://stash.example.com      # paste a key that can change
 stashai doctor                                # checks Stash, the model and the context size
 stashai                                       # the terminal UI: first asks which local model to use

@@ -389,10 +389,11 @@ def make_diff(before: dict[int, Optional[dict]], after: dict[int, dict], where_b
         entry: dict = {"id": bid, "change": kind, "title": ref["title"], "url": ref["url"]}
         if kind == "updated":
             changed = False
-            for field in ("title", "url", "notes", "color"):
-                if old[field] != new[field]:
-                    entry[field] = [old[field], new[field]]
-                    changed = True
+            # "title" and "url" stay the bookmark's current values; what changed goes into "fields"
+            fields = {f: [old[f], new[f]] for f in ("title", "url", "notes", "color") if old[f] != new[f]}
+            if fields:
+                entry["fields"] = fields
+                changed = True
             if sorted(old["tags"]) != sorted(new["tags"]):
                 entry["tags"] = [old["tags"], new["tags"]]
                 changed = True

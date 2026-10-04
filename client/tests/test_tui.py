@@ -76,6 +76,11 @@ def test_ask_preview_apply_and_undo(api, tmp_path, monkeypatch):
             assert "Four matches." in text_of(log_w) and "S2: 4 bookmarks" in text_of(view)
             await send("/history")
             assert "Delete the bun recipe" in text_of(view) and "undone" in text_of(view)
+            real_ask = app.agent.ask
+            app.agent.ask = lambda *a, **k: 1 / 0
+            await send("this hits a bug")
+            assert "Something went wrong (ZeroDivisionError" in text_of(log_w) and app.is_running
+            app.agent.ask = real_ask
             await send("/nonsense")
             assert "Unknown command" in text_of(log_w)
             await pilot.press("f1")
