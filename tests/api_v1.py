@@ -127,8 +127,9 @@ with TestClient(app):
     new_id = upd["diff"][0]["id"]
     fix = ok(W.post("/api/v1/changes", json={"ops": [{"op": "update", "id": new_id, "url": "https://new.example/a",
                                                      "title": "New"}]}))
-    assert fix["counts"]["updated"] == 1 and fix["diff"][0]["url"] == ["https://old.example/a", "https://new.example/a"]
-    assert fix["diff"][0]["title"] == ["Old", "New"]
+    assert fix["counts"]["updated"] == 1 and fix["diff"][0]["fields"]["url"] == ["https://old.example/a", "https://new.example/a"]
+    assert fix["diff"][0]["fields"]["title"] == ["Old", "New"]
+    assert fix["diff"][0]["title"] == "New" and fix["diff"][0]["url"] == "https://new.example/a", "current values stay strings"
     assert ok(R.get("/api/v1/bookmarks", params={"host": "new.example"}))["total"] == 1
     same = ok(W.post("/api/v1/changes", json={"ops": [{"op": "update", "id": new_id, "title": "New"}]}))
     assert same["counts"]["unchanged"] == 1 and same["changeset"] is None

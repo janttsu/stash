@@ -320,11 +320,33 @@ class StashAI(App):
     def do_ask(self, text: str) -> None:
         try:
             out = self.agent.ask(text, cancel=self.cancel, emit=self.emit)
+        except Exception as e:  # noqa: BLE001  (a bug must not end the session; the log has the details)
+            out = Outcome("error", self.unexpected(e))
         finally:
             self.busy = False
         self.call_from_thread(self.outcome, out)
 
+    def unexpected(self, e: Exception) -> str:
+        import traceback
+
+        if self.log_file:
+            self.log_file(f"--- UNEXPECTED ERROR\n{traceback.format_exc()}")
+        where = f" Details: {self.log_file.path}" if self.log_file else ""
+        return f"Something went wrong ({type(e).__name__}: {e}). Nothing was changed.{where}"
+
     def outcome(self, out: Outcome) -> None:
+        try:
+            self.show_outcome(out)
+        except Exception as e:  # noqa: BLE001  (a display problem must never take the session down)
+            import traceback
+
+            if self.log_file:
+                self.log_file(f"--- DISPLAY ERROR\n{traceback.format_exc()}")
+            self.say(f"Could not show the result ({type(e).__name__}: {e}). The details are in the log; "
+                     "nothing was changed.", "bold red")
+            self.set_state("ready")
+
+    def show_outcome(self, out: Outcome) -> None:
         if out.kind == "plan":
             p = out.plan
             c = p.preview["counts"]
@@ -348,6 +370,9 @@ class StashAI(App):
                                   f"{c['deleted']} deleted, {c['created']} added). /undo takes it back.", "green")
         except (StashError, ValueError) as e:
             self.call_from_thread(self.say, f"Could not apply: {getattr(e, 'code', None) or e}", "bold red")
+        except Exception as e:  # noqa: BLE001
+            self.call_from_thread(self.say, self.unexpected(e).replace("Nothing was changed.", "Check /history: "
+                                  "the change may or may not have been applied."), "bold red")
         finally:
             self.busy = False
             self.call_from_thread(self.set_state, "ready")
