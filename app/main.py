@@ -29,6 +29,13 @@ ORIGIN = os.environ.get("STASH_ORIGIN", "http://localhost:8003")
 COOKIE = "stash_session"
 SECURE_COOKIE = os.environ.get("STASH_INSECURE_COOKIE") != "1"
 SESSION_TTL = 90 * 86400
+# STASH_REGISTRATION fixes who can create an account: invite (the default: an invitation link is needed), open
+# (anyone) or closed. When it is unset, the administrator chooses in Settings → Users and registration and the
+# choice is stored in the database.
+REGISTRATION_MODES = ("open", "invite", "closed")
+REGISTRATION_ENV = os.environ.get("STASH_REGISTRATION", "").strip().lower() or None
+if REGISTRATION_ENV is not None and REGISTRATION_ENV not in REGISTRATION_MODES:
+    raise SystemExit(f"STASH_REGISTRATION must be one of {', '.join(REGISTRATION_MODES)}, not {REGISTRATION_ENV!r}")
 
 MAX_BOOKMARKS = 50_000
 MAX_TABS = 200
@@ -383,7 +390,8 @@ class Login(BaseModel):
 
 
 def registration_mode(con) -> str:
-    return db.get_config(con, "registration", "invite")
+    """Who can create an account: the STASH_REGISTRATION variable wins, otherwise the administrator's setting."""
+    return REGISTRATION_ENV or db.get_config(con, "registration", "invite")
 
 
 @app.get("/api/public")
@@ -576,7 +584,8 @@ def admin_overview(c: Ctx = Depends(admin)):
     invites = [dict(r) for r in c.con.execute(
         "SELECT i.code, i.created_at, i.used_at, u.username AS used_by FROM invites i"
         " LEFT JOIN users u ON u.id=i.used_by ORDER BY i.created_at DESC LIMIT 200")]
-    return {"registration": registration_mode(c.con), "users": users, "invites": invites}
+    return {"registration": registration_mode(c.con), "registration_fixed": REGISTRATION_ENV is not None,
+            "users": users, "invites": invites}
 
 
 class AdminConfig(BaseModel):
@@ -585,6 +594,8 @@ class AdminConfig(BaseModel):
 
 @app.put("/api/admin/config")
 def admin_config(body: AdminConfig, c: Ctx = Depends(admin)):
+    if REGISTRATION_ENV is not None:
+        raise err(409, "registration_fixed")
     db.set_config(c.con, "registration", body.registration)
     return {"ok": True}
 

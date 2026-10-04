@@ -59,6 +59,7 @@ const ERRORS = {
   bad_username: 'Username must be 3–32 characters: letters, numbers, . _ -',
   bad_invite: 'The invitation is not valid or has already been used.',
   registration_closed: 'Registration is closed.',
+  registration_fixed: 'This is set by the server configuration (STASH_REGISTRATION).',
   wrong_password: 'Wrong password.',
   bad_url: 'That address cannot be bookmarked.',
   limit_reached: 'Limit reached.',

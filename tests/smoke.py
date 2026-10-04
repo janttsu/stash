@@ -14,6 +14,7 @@ os.environ["STASH_INSECURE_COOKIE"] = "1"
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import cli, db, importer, net, security  # noqa: E402
+from app import main as main_module  # noqa: E402
 from app.main import app, loose_url  # noqa: E402
 
 H = {"X-Stash": "1"}
@@ -247,6 +248,19 @@ with TestClient(app):  # runs startup (schema creation)
     ok(b.post("/api/login", json={"username": "bob", "password": temp}))
     ok(a.post("/api/account/delete", json={"password": "new password 1"}), 409)  # last admin with other users
     ok(a.put("/api/admin/config", json={"registration": "open"}))
+    assert ok(a.get("/api/admin"))["registration_fixed"] is False
+    # STASH_REGISTRATION overrides the stored setting and locks it
+    main_module.REGISTRATION_ENV = "closed"
+    try:
+        assert ok(anon.get("/api/public"))["registration"] == "closed"
+        assert ok(a.get("/api/admin"))["registration_fixed"] is True
+        ok(a.put("/api/admin/config", json={"registration": "open"}), 409)
+        ok(anon.post("/api/register", json={"username": "carol", "password": "carol password"}), 403)
+        main_module.REGISTRATION_ENV = "open"
+        assert ok(anon.get("/api/public"))["registration"] == "open"
+    finally:
+        main_module.REGISTRATION_ENV = None
+    assert ok(anon.get("/api/public"))["registration"] == "open"  # the stored setting is still there
     ok(anon.post("/api/register", json={"username": "carol", "password": "carol password", "lang": "sv"}))
     carol_dash = ok(anon.get("/api/dashboard"))
     assert carol_dash["tabs"][0]["name"] == "Hem" and carol_dash["categories"][0]["name"] == "Favoriter"

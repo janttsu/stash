@@ -282,6 +282,7 @@ export const SV = {
   "This permanently deletes your account and all your bookmarks. Export them first if you want a copy.": "Detta tar bort ditt konto och alla dina bokmärken permanent. Exportera dem först om du vill ha en kopia.",
   "Users and registration": "Användare och registrering",
   "Who can create an account": "Vem kan skapa ett konto",
+  "This is set by the server configuration (STASH_REGISTRATION).": "Detta styrs av serverns konfiguration (STASH_REGISTRATION).",
   "Only people with an invitation link": "Bara personer med en inbjudningslänk",
   "Anyone": "Vem som helst",
   "Nobody": "Ingen",

@@ -77,9 +77,19 @@ journalctl --user -u stash -f          # logs
 ```
 
 The first account is the administrator. By default you can only register with an invitation link; the
-administrator creates invitations and changes the mode in Settings → Users and registration.
+administrator creates invitations and changes the mode in Settings → Users and registration. To decide this in
+the server configuration instead (for example in the systemd unit), set `STASH_REGISTRATION`:
 
-Environment variables: `STASH_ORIGIN` (public address), `STASH_DATA` (data directory, default `./data`).
+| `STASH_REGISTRATION` | Who can create an account |
+| --- | --- |
+| `invite` | only people with an invitation link (the default when the variable is unset) |
+| `open` | anyone, with just a username and a password: no email address or confirmation is needed |
+| `closed` | nobody |
+
+While the variable is set, the setting in Settings → Users and registration is shown but cannot be changed.
+
+Environment variables: `STASH_ORIGIN` (public address), `STASH_DATA` (data directory, default `./data`),
+`STASH_REGISTRATION` (see above).
 
 ## The API and stashai
 

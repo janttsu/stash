@@ -5,6 +5,7 @@
   reset-password <username>   set a new random password (also turns off 2FA, signs the user out)
   make-admin <username>       grant administrator rights
   registration <open|invite|closed>
+                              who can create an account (ignored while STASH_REGISTRATION is set)
 """
 from __future__ import annotations
 
@@ -43,6 +44,8 @@ def main(argv: list[str]) -> int:
             return 1
     elif cmd == "registration" and args[:1] in (["open"], ["invite"], ["closed"]):
         db.set_config(con, "registration", args[0])
+        if fixed := os.environ.get("STASH_REGISTRATION"):
+            print(f"note: STASH_REGISTRATION={fixed} is set; the server uses it until it is removed", file=sys.stderr)
     else:
         print(__doc__)
         return 2

@@ -24,9 +24,9 @@ async function save(patch) {
   });
 }
 
-const selectField = (label, options, value, onchange) => h('label', { class: 'field field--inline' },
+const selectField = (label, options, value, onchange, { disabled = false } = {}) => h('label', { class: 'field field--inline' },
   h('span', null, label),
-  h('select', { class: 'input', onchange: (e) => onchange(e.target.value) },
+  h('select', { class: 'input', disabled, onchange: (e) => onchange(e.target.value) },
     options.map(([v, text]) => h('option', { value: v, selected: v === value }, text))));
 
 const checkField = (label, key, hint) => h('label', { class: 'check' },
@@ -341,7 +341,9 @@ async function drawAdmin(card) {
     ], data.registration, (registration) => attempt(async () => {
       await api('PUT', '/api/admin/config', { registration });
       toast(t('Saved'));
-    })),
+    }), { disabled: data.registration_fixed }),
+    data.registration_fixed && h('p', { class: 'muted small' },
+      t('This is set by the server configuration (STASH_REGISTRATION).')),
     h('h3', null, t('Invitations')),
     h('p', { class: 'muted' }, t('Each link lets one person create an account.')),
     h('ul', { class: 'plain' }, open.map((i) => h('li', { class: 'row' },
