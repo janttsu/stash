@@ -1,0 +1,17 @@
+{
+  "extName": {
+    "message": "Lisää Stashiin"
+  },
+  "extDescription": {
+    "message": "Tallenna nykyinen sivu, linkki tai kaikki avoimet välilehdet Stash-kirjanmerkkeihisi."
+  },
+  "menuPage": {
+    "message": "Lisää sivu Stashiin"
+  },
+  "menuLink": {
+    "message": "Lisää linkki Stashiin"
+  },
+  "menuAll": {
+    "message": "Tallenna kaikki avoimet välilehdet"
+  }
+}

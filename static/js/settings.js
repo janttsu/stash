@@ -39,7 +39,7 @@ function appearance() {
     h('h2', null, t('Appearance')),
     selectField(t('Theme'), [['auto', t('Follow the device')], ['light', t('Light')], ['dark', t('Dark')]], s.theme,
       async (theme) => { await save({ theme }); applyTheme(theme); }),
-    selectField(t('Language'), [['', t('Follow the browser')], ['fi', 'Suomi'], ['en', 'English']], s.lang,
+    selectField(t('Language'), [['', t('Follow the browser')], ['en', 'English'], ['fi', 'Suomi'], ['sv', 'Svenska']], s.lang,
       async (lang) => { await save({ lang }); setLang(lang); location.reload(); }),
     selectField(t('Size of tab titles'), [['s', t('Small')], ['m', t('Medium')], ['l', t('Large')]], s.tab_size,
       (tab_size) => save({ tab_size })),

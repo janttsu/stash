@@ -355,15 +355,19 @@ def site_icon():
 def extension_zip():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in sorted((BASE / "extension").iterdir()):
+        root = BASE / "extension"
+        for f in sorted(root.rglob("*")):  # includes _locales/<lang>/messages.json
             if f.is_file() and f.name != "config.js":
-                z.write(f, f"stash-extension/{f.name}")
+                z.write(f, f"stash-extension/{f.relative_to(root).as_posix()}")
         z.writestr("stash-extension/config.js", f"const STASH_ORIGIN = {json.dumps(ORIGIN)};\n")
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": 'attachment; filename="stash-extension.zip"'})
 
 
 # --- auth --------------------------------------------------------------------
+
+FIRST_TAB = {"en": ("Home", "Favorites"), "fi": ("Koti", "Suosikit"), "sv": ("Hem", "Favoriter")}
+
 
 class Register(BaseModel):
     username: str
@@ -413,9 +417,9 @@ def register(body: Register, request: Request, response: Response, con=Depends(g
                           (username, pw_hash, int(first), db.now())).lastrowid
         if mode == "invite":
             con.execute("UPDATE invites SET used_by=?, used_at=? WHERE code=?", (uid, db.now(), body.invite))
-        fi = body.lang == "fi"
-        tab_id = new_tab(con, uid, "Koti" if fi else "Home")
-        new_category(con, uid, tab_id, "Suosikit" if fi else "Favorites")
+        tab_name, cat_name = FIRST_TAB.get(body.lang, FIRST_TAB["en"])
+        tab_id = new_tab(con, uid, tab_name)
+        new_category(con, uid, tab_id, cat_name)
         start_session(con, response, uid)
     limiter.hit(ip_key)
     return {"ok": True}
@@ -465,7 +469,7 @@ def me(c: Ctx = Depends(ctx)):
 
 class SettingsPatch(BaseModel):
     theme: Optional[Literal["auto", "light", "dark"]] = None
-    lang: Optional[Literal["", "fi", "en"]] = None
+    lang: Optional[Literal["", "fi", "en", "sv"]] = None
     tab_size: Optional[Literal["s", "m", "l"]] = None
     new_tab: Optional[bool] = None
     tooltips: Optional[bool] = None

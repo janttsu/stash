@@ -1,8 +1,10 @@
 """End-to-end API smoke test against a throwaway database:  .venv/bin/python tests/smoke.py"""
+import io
 import os
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -245,7 +247,11 @@ with TestClient(app):  # runs startup (schema creation)
     ok(b.post("/api/login", json={"username": "bob", "password": temp}))
     ok(a.post("/api/account/delete", json={"password": "new password 1"}), 409)  # last admin with other users
     ok(a.put("/api/admin/config", json={"registration": "open"}))
-    ok(anon.post("/api/register", json={"username": "carol", "password": "carol password"}))
+    ok(anon.post("/api/register", json={"username": "carol", "password": "carol password", "lang": "sv"}))
+    carol_dash = ok(anon.get("/api/dashboard"))
+    assert carol_dash["tabs"][0]["name"] == "Hem" and carol_dash["categories"][0]["name"] == "Favoriter"
+    ok(anon.patch("/api/settings", json={"lang": "sv"}))
+    ok(anon.patch("/api/settings", json={"lang": "de"}), 422)
     ok(a.delete(f"/api/admin/users/{bob['id']}"))
     ok(b.get("/api/me"), 401)
     ok(anon.post("/api/logout"))
@@ -258,6 +264,8 @@ with TestClient(app):  # runs startup (schema creation)
         assert "script-src 'self'" in r.headers["content-security-policy"] and r.headers["x-frame-options"] == "DENY"
     z = anon.get("/extension.zip")
     assert z.status_code == 200 and z.content[:2] == b"PK"
+    names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
+    assert {f"stash-extension/_locales/{lang}/messages.json" for lang in ("en", "fi", "sv")} <= set(names), names
     ok(anon.get("/favicon/localhost"), 404)
     ok(anon.get("/favicon/..%2f..%2fetc"), 404)
 

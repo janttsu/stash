@@ -1,0 +1,17 @@
+{
+  "extName": {
+    "message": "Lägg till i Stash"
+  },
+  "extDescription": {
+    "message": "Spara den aktuella sidan, en länk eller alla öppna flikar i dina Stash-bokmärken."
+  },
+  "menuPage": {
+    "message": "Lägg till sidan i Stash"
+  },
+  "menuLink": {
+    "message": "Lägg till länken i Stash"
+  },
+  "menuAll": {
+    "message": "Bokmärk alla öppna flikar"
+  }
+}

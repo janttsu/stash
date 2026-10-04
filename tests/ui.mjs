@@ -341,6 +341,15 @@ try {
   check(await js(`return document.documentElement.scrollWidth <= window.innerWidth`), 'no horizontal scroll on a phone');
   check(await js(`return document.querySelector('.top__link').textContent`) === 'Työpöytä', 'Finnish UI');
   await shot('18-phone-dark-fi');
+  await js(`${HELPERS} await $api('PATCH', '/api/settings', { lang: 'sv' });`);
+  await goto('/');
+  await waitFor('.cat');
+  check(await js(`return document.querySelector('.top__link').textContent`) === 'Skrivbord', 'Swedish UI');
+  check(await js(`return document.documentElement.lang`) === 'sv', 'html lang is sv');
+  await shot('18b-phone-dark-sv');
+  await js(`${HELPERS} await $api('PATCH', '/api/settings', { lang: 'fi' });`);
+  await goto('/');
+  await waitFor('.cat');
   await goto('/#/bookmarks');
   await waitFor('.row-bm');
   check(await js(`return document.documentElement.scrollWidth <= window.innerWidth`), 'no horizontal scroll on the phone list');

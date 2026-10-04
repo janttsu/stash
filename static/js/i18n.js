@@ -1,4 +1,8 @@
-// UI strings are written in English in the code; FI maps them to Finnish. `node tools/check-i18n.mjs` finds gaps.
+// UI strings are written in English in the code; FI maps them to Finnish and SV (i18n-sv.js) to Swedish.
+// `node tools/check-i18n.mjs` finds gaps.
+import { SV } from './i18n-sv.js';
+
+export const LANGS = ['en', 'fi', 'sv'];
 export const FI = {
   // general
   'OK': 'OK',
@@ -371,9 +375,13 @@ let lang = 'en';
 function detect() {
   try {
     const stored = localStorage.getItem('stash.lang');
-    if (stored === 'fi' || stored === 'en') return stored;
+    if (LANGS.includes(stored)) return stored;
   } catch { /* private mode */ }
-  return (navigator.language || '').toLowerCase().startsWith('fi') ? 'fi' : 'en';
+  for (const wanted of navigator.languages || [navigator.language || '']) {
+    const code = String(wanted).toLowerCase().slice(0, 2);
+    if (LANGS.includes(code)) return code;
+  }
+  return 'en';
 }
 
 /** '' = follow the browser. */
@@ -389,7 +397,8 @@ export function setLang(next) {
 export const getLang = () => lang;
 
 export function t(text, vars) {
-  let out = (lang === 'fi' && FI[text]) || text;
+  const dict = lang === 'fi' ? FI : lang === 'sv' ? SV : null;
+  let out = (dict && dict[text]) || text;
   if (vars) for (const [key, value] of Object.entries(vars)) out = out.replaceAll(`{${key}}`, value);
   return out;
 }
