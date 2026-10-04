@@ -37,7 +37,8 @@ def test_ask_preview_apply_and_undo(api, tmp_path, monkeypatch):
     log = Log()
     monkeypatch.setattr(cli, "newer_version", lambda url: ("9.9.9", "https://stash.test/dl/x.whl"))
     monkeypatch.setattr(cli, "build", lambda cfg: (Agent(api=api, llm=llm, store=Store(), log=log), log))
-    cfg = Config(stash_url="https://stash.test", api_key="k", model="fake", rules_path=tmp_path / "rules.md")
+    cfg = Config(stash_url="https://stash.test", api_key="k", model="fake", model_chosen=True,
+                 rules_path=tmp_path / "rules.md")
 
     async def scenario():
         app = tui.StashAI(cfg)
@@ -79,3 +80,47 @@ def test_ask_preview_apply_and_undo(api, tmp_path, monkeypatch):
 
     asyncio.run(scenario())
     assert any("APPLIED as change" in x for x in logs)
+
+
+def test_asks_for_the_model_when_none_was_given(api, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    llm = FakeLLM([])
+
+    class Log:
+        path = tmp_path / "session.log"
+
+        def __call__(self, text):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cli, "newer_version", lambda url: None)
+    monkeypatch.setattr(cli, "build", lambda cfg: (Agent(api=api, llm=llm, store=Store(), log=Log()), Log()))
+    cfg = Config(stash_url="https://stash.test", api_key="k", model="qwen3.6:35b-a3b", rules_path=tmp_path / "r.md")
+
+    async def scenario():
+        app = tui.StashAI(cfg)
+        async with app.run_test(size=(160, 40)) as pilot:
+            for _ in range(60):
+                await pilot.pause(0.05)
+                if isinstance(app.screen, tui.ModelPicker):
+                    break
+            assert isinstance(app.screen, tui.ModelPicker), "the model list is shown first"
+            await pilot.pause(0.2)
+            options = app.screen.option_list
+            labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+            assert len(labels) == 3 and "23.9 GB" in labels[1] and labels[1].endswith("(default)")
+            assert options.highlighted == 1, "the configured model is offered first"
+            await pilot.press("down", "enter")
+            for _ in range(60):
+                await pilot.pause(0.05)
+                if app.ready:
+                    break
+            assert app.ready and llm.model == "small:9b" and cfg.model == "small:9b"
+            assert "Model small:9b ready" in text_of(app.query_one("#log", RichLog))
+        # the next start offers the model chosen now
+        from stashai.config import last_model
+        assert last_model() == "small:9b"
+
+    asyncio.run(scenario())

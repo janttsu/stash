@@ -7,11 +7,13 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Input, RichLog, Static
+from textual.screen import ModalScreen
+from textual.widgets import Footer, Input, OptionList, RichLog, Static
+from textual.widgets.option_list import Option
 
 from stashai.agent import Outcome
 from stashai.api import StashError
-from stashai.config import Config
+from stashai.config import Config, last_model, remember_model
 from stashai.llm import LLMError
 from stashai.render import plan_text, set_text
 
@@ -33,12 +35,66 @@ Commands:
   /history             the latest changes
   /sets                the result sets of this session      /show S3   list a set
   /refresh             load the bookmarks again              /new       forget this conversation
-  /rules               your rules file                       /model NAME
+  /rules               your rules file                       /model [NAME]  (no name: choose from a list)
   /quit
 Keys: Esc stops the model · PgUp/PgDn scroll the right pane · Ctrl+Q quits"""
 
 YES = {"y", "yes", "k", "kyllä", "joo", "ok"}
 NO = {"n", "no", "e", "ei"}
+
+
+def model_label(m: dict, marks: list[str]) -> str:
+    size = f"{m['size_gb']:>5.1f} GB" if m.get("size_gb") else "        "
+    info = " ".join(x for x in (m.get("params"), m.get("quant")) if x)
+    tail = f"  ({', '.join(marks)})" if marks else ""
+    return f"{m['name']:<36} {size}  {info:<16}{tail}"
+
+
+class ModelPicker(ModalScreen[str]):
+    """Choose the local model; Enter picks, Esc keeps the highlighted default."""
+
+    CSS = """
+    ModelPicker { align: center middle; }
+    #picker { width: 96; max-width: 95%; height: auto; max-height: 80%; border: round $primary;
+              background: $surface; padding: 0 1; }
+    #picker-title { padding: 1 0 0 0; }
+    #picker-help { color: $text-muted; padding: 0 0 1 0; }
+    #models { height: auto; max-height: 24; }
+    """
+    BINDINGS = [Binding("escape", "keep", "Use the highlighted one")]
+
+    def __init__(self, models: list[dict], default: str, recommended: str, last: str = ""):
+        super().__init__()
+        self.models, self.default, self.recommended, self.last = models, default, recommended, last
+
+    def compose(self) -> ComposeResult:
+        options = []
+        for m in self.models:
+            marks = [x for x, on in (("last used", m["name"] == self.last),
+                                     ("default", m["name"] == self.recommended),
+                                     ("loaded now", m.get("loaded"))) if on]
+            options.append(Option(Text(model_label(m, marks)), id=m["name"]))
+        with Vertical(id="picker"):
+            yield Static(Text("Which local model should read your bookmarks and pages?", style="bold"), id="picker-title")
+            yield Static(Text(f"{len(self.models)} models on this computer. ↑/↓ choose, Enter use it. "
+                              "Bigger models plan better, smaller ones answer faster. "
+                              "Next time: stashai -m NAME skips this question."), id="picker-help")
+            self.option_list = OptionList(*options, id="models")
+            yield self.option_list
+
+    def on_mount(self) -> None:
+        self.call_after_refresh(self.highlight_default)
+
+    def highlight_default(self) -> None:
+        names = [m["name"] for m in self.models]
+        self.option_list.highlighted = names.index(self.default) if self.default in names else 0
+        self.option_list.focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
+
+    def action_keep(self) -> None:
+        self.dismiss(self.models[self.option_list.highlighted or 0]["name"])
 
 
 class StashAI(App):
@@ -129,21 +185,62 @@ class StashAI(App):
             self.call_from_thread(self.say, f"Signed in to {self.agent.api.url} as {me['user']}: "
                                   f"{len(self.agent.store.bookmarks)} bookmarks, {len(self.agent.store.tags)} tags."
                                   + ("" if me["can_write"] else "  This key is READ ONLY: changes cannot be applied."))
-            ok, msg = self.agent.llm.health()
-            if not ok:
-                raise LLMError(msg)
-            ctx = self.agent.check_context()
-            self.call_from_thread(self.set_state, "loading the model")
-            self.agent.llm.chat([{"role": "system", "content": "Reply with {}"}, {"role": "user", "content": "{}"}],
-                                max_tokens=4)
-            self.call_from_thread(self.say, f"Model {self.agent.llm.model} ready ({ctx}). Log: {self.log_file.path}", "dim")
-            self.ready = True
-            self.check_update()
+            if not self.cfg.model_chosen:
+                models = self.agent.llm.model_details()
+                if not models:
+                    raise LLMError(f"Ollama at {self.agent.llm.base} has no models. Pull one, e.g.: "
+                                   f"ollama pull {self.cfg.model}")
+                self.call_from_thread(self.ask_model, models)
+                return  # start_model continues once a model is chosen
+            self.start_model()
         except (StashError, LLMError, ValueError, OSError) as e:
             self.call_from_thread(self.say, f"Cannot start: {getattr(e, 'code', None) or e}", "bold red")
             self.call_from_thread(self.say, "Check the settings with: stashai doctor")
         except SystemExit as e:
             self.call_from_thread(self.say, str(e), "bold red")
+        finally:
+            self.busy = False
+            self.call_from_thread(self.set_state, "ready" if self.ready else
+                                  "choose a model" if self.picking else "not connected")
+
+    picking = False
+
+    def ask_model(self, models: list[dict]) -> None:
+        """Show the model list; once one is chosen, load it."""
+        self.picking = True
+        last = last_model()
+        default = last if last in {m["name"] for m in models} else self.cfg.model
+
+        def chosen(name: str | None) -> None:
+            self.picking = False
+            if not name:
+                return
+            self.cfg.model = self.agent.llm.model = name
+            remember_model(name)
+            self.say(f"Model: {name}")
+            self.background(self.start_model)
+
+        self.push_screen(ModelPicker(models, default, self.cfg.model, last), chosen)
+
+    def start_model(self) -> None:
+        """Check the chosen model, size its context and load it (runs in a worker thread)."""
+        try:
+            ok, msg = self.agent.llm.health()
+            if not ok:
+                raise LLMError(msg)
+            self.cfg.model = self.agent.llm.model
+            ctx = self.agent.check_context()
+            self.call_from_thread(self.set_state, "loading the model")
+            self.agent.llm.chat([{"role": "system", "content": "Reply with {}"}, {"role": "user", "content": "{}"}],
+                                max_tokens=4)
+            self.call_from_thread(self.say, f"Model {self.agent.llm.model} ready ({ctx}). Log: {self.log_file.path}", "dim")
+            first = not self.ready
+            self.ready = True
+            if first:
+                self.check_update()
+        except (LLMError, ValueError, OSError) as e:
+            self.call_from_thread(self.say, f"The model does not work: {e}", "bold red")
+            self.call_from_thread(self.say, "Choose another with /model, or check: stashai doctor")
         finally:
             self.busy = False
             self.call_from_thread(self.set_state, "ready" if self.ready else "not connected")
@@ -169,6 +266,8 @@ class StashAI(App):
         if not self.agent or not self.ready:
             if text in ("/quit", "/exit"):
                 self.exit()
+            elif self.agent and text.split()[:1] == ["/model"]:
+                self.command(text)  # a model that did not work can be replaced before anything else
             return
         pending = self.agent.pending
         if pending and (text.lower() in YES or text == ""):
@@ -275,10 +374,23 @@ class StashAI(App):
                       + ["", "The file is read again for every request."])
         elif cmd == "/model" and args:
             self.cfg.model = a.llm.model = args[0]
+            remember_model(args[0])
             self.say(f"Model: {args[0]}")
-            self.set_state("ready")
+            self.background(self.start_model)
+        elif cmd == "/model":
+            self.background(self.do_pick_model)
         else:
             self.say("Unknown command. F1 = help.", "yellow")
+
+    def do_pick_model(self) -> None:
+        try:
+            models = self.agent.llm.model_details()
+            self.call_from_thread(self.ask_model, models)
+        except Exception as e:  # noqa: BLE001  (shown to the user)
+            self.call_from_thread(self.say, f"Cannot list the models: {e}", "red")
+        finally:
+            self.busy = False
+            self.call_from_thread(self.set_state, "ready")
 
     def do_refresh(self) -> None:
         try:

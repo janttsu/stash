@@ -1,8 +1,8 @@
 """stashai – manage your Stash bookmarks in plain language with a local model.
 
-  stashai                       the terminal UI
+  stashai [-m MODEL]            the terminal UI; without -m it asks which local model to use
   stashai login [URL]           save the Stash address and an API key (Stash → Settings → API keys)
-  stashai ask "REQUEST" [--yes] one request without the UI; asks before changing anything
+  stashai ask "REQUEST" [--yes] [-m MODEL]   one request without the UI; asks before changing anything
   stashai doctor                check the connection to Stash and the model
   stashai history               the latest changes made with API keys
   stashai undo [ID] [--force]   undo the latest change (or change ID)
@@ -218,13 +218,14 @@ def cmd_undo(cfg: Config, changeset: int | None, force: bool) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="stashai", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--version", action="version", version=f"stashai {__version__}")
-    p.add_argument("--model", help="the Ollama model to use (default from the config: qwen3.6:35b-a3b)")
+    p.add_argument("-m", "--model", help="the local model to use, e.g. qwen3.6:35b-a3b (the UI asks when not given)")
     sub = p.add_subparsers(dest="cmd")
     s = sub.add_parser("login")
     s.add_argument("url", nargs="?")
     s = sub.add_parser("ask")
     s.add_argument("request", nargs="+")
     s.add_argument("--yes", action="store_true", help="apply the proposal without asking")
+    s.add_argument("-m", "--model", dest="ask_model", help="the local model to use (default: the config's)")
     sub.add_parser("doctor")
     sub.add_parser("history")
     s = sub.add_parser("undo")
@@ -235,8 +236,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--check", action="store_true", help="only tell whether a newer version exists")
     args = p.parse_args(argv)
     cfg = load()
-    if args.model:
-        cfg.model = args.model
+    model = args.model or getattr(args, "ask_model", None)
+    if model:
+        cfg.model, cfg.model_chosen = model, True
     try:
         if args.cmd == "login":
             return cmd_login(cfg, args.url)
