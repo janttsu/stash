@@ -64,6 +64,7 @@ class Agent:
     turns: list[Turn] = field(default_factory=list)
     pending: Plan | None = None
     context: int = 32768
+    context_used: int = 0    # tokens of the latest conversation step (prompt + answer)
     web: Web | None = None
     moved_to: dict[int, str] = field(default_factory=dict)   # bookmark id -> new address found by check
 
@@ -109,6 +110,10 @@ class Agent:
                                     on_progress=lambda n: emit("status", f"thinking (step {step}, {n} tokens)"))
                 messages.append({"role": "assistant", "content": raw})
                 self.log(f"--- model (step {step}, {self.llm.last_stats})\n{raw}")
+                stats = self.llm.last_stats or {}
+                used = (stats.get("prompt_tokens") or 0) + (stats.get("answer_tokens") or 0)
+                self.context_used = used or sum(len(m["content"]) for m in messages) // 3  # estimate without stats
+                emit("context", str(self.context_used))
                 try:
                     call = extract_json(raw)
                     tool, args = str(call.get("tool", "")), call.get("args") or {}

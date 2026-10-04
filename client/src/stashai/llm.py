@@ -126,8 +126,10 @@ class LLM:
                     if on_progress and chunks % 8 == 0:
                         on_progress(chunks)
                 if data.get("done"):
-                    self.last_stats = {"prompt_tokens": data.get("prompt_eval_count", 0),
-                                       "answer_tokens": data.get("eval_count", 0)}
+                    # tokens read from the prompt cache are counted apart from the newly read ones
+                    self.last_stats = {"prompt_tokens": (data.get("prompt_eval_count") or 0)
+                                       + (data.get("prompt_eval_cached_count") or 0),
+                                       "answer_tokens": data.get("eval_count") or 0}
                     break
         text = "".join(parts)
         if not text.strip():
