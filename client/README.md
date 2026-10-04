@@ -25,7 +25,7 @@ You need Python 3.11+, pipx and Ollama with the model:
 
 ```sh
 ollama pull qwen3.6:35b-a3b
-pipx install --force https://stash.example.com/dl/stashai-0.1.6-py3-none-any.whl   # exact address: Stash → Settings → API keys
+pipx install --force https://stash.example.com/dl/stashai-0.1.7-py3-none-any.whl   # exact address: Stash → Settings → API keys
 stashai login https://stash.example.com      # paste a key that can change
 stashai doctor                                # checks Stash, the model and the context size
 stashai                                       # the terminal UI: first asks which local model to use
@@ -46,11 +46,15 @@ Get an API key from Stash: Settings → API keys → Create API key. It is saved
 
 - At start, stashai lists every model your Ollama has (size, parameters, which one is loaded) and asks which
   one to use; the one you chose last time is highlighted. `-m NAME` (or `STASHAI_MODEL`) skips the question,
-  and `/model` changes the model later.
+  and **F2** (or `/model`) changes the model at any point of the session.
+- The status line shows how full the model's context was at its latest step, e.g. `context 9.4k/32k (29 %)`,
+  yellow from 60 % and red from 85 %. Older tool results are shortened automatically when it fills up, and
+  every request starts with a fresh context (earlier requests are carried over as a short summary).
 - On the left: the conversation and the model's steps. On the right: results and proposals.
 - A proposal shows every change (tags +/-, moves, new order, deletions). **y** or an empty Enter applies it,
   **n** rejects it, or write a correction instead ("don't delete the ones tagged x").
-- **Esc** stops the model, **PgUp/PgDn** scroll the right pane, **F1** help, **Ctrl+Q** quits.
+- **Esc** stops the model, **F2** changes the model, **PgUp/PgDn** scroll the right pane, **F1** help,
+  **Ctrl+Q** quits.
 - Commands: `/undo [ID] [force]`, `/history`, `/sets`, `/show S3`, `/refresh`, `/new`, `/rules`, `/model NAME`.
 
 Without the UI: `stashai ask "request" [-m MODEL]` (the model from the config unless given; asks before

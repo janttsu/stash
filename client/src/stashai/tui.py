@@ -35,9 +35,11 @@ Commands:
   /history             the latest changes
   /sets                the result sets of this session      /show S3   list a set
   /refresh             load the bookmarks again              /new       forget this conversation
-  /rules               your rules file                       /model [NAME]  (no name: choose from a list)
+  /rules               your rules file                       /model [NAME]  (F2: choose from a list)
   /quit
-Keys: Esc stops the model · PgUp/PgDn scroll the right pane · Ctrl+Q quits"""
+Keys: Esc stops the model · F2 changes the model · PgUp/PgDn scroll the right pane · Ctrl+Q quits
+The status line shows how full the model's context was at its latest step (yellow from 60 %, red from 85 %);
+older tool results are shortened automatically when it fills up, and every request starts afresh."""
 
 YES = {"y", "yes", "k", "kyllä", "joo", "ok"}
 NO = {"n", "no", "e", "ei"}
@@ -113,6 +115,7 @@ class StashAI(App):
         Binding("pageup", "scroll_view(-1)", "Scroll", show=False),
         Binding("pagedown", "scroll_view(1)", "Scroll", show=False),
         Binding("f1", "help", "Help"),
+        Binding("f2", "pick_model", "Model"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
 
@@ -158,8 +161,14 @@ class StashAI(App):
         if a and a.store.bookmarks:
             parts.append(f"{a.api.url.split('://', 1)[1]} · {len(a.store.bookmarks)} bookmarks")
         parts.append(self.cfg.model)
-        parts.append(state)
-        self.query_one("#status", Static).update(Text(" · ".join(parts)))
+        status = Text(" · ".join(parts))
+        if a and a.context_used:
+            pct = 100 * a.context_used / max(1, a.context)
+            style = "bold red" if pct >= 85 else "yellow" if pct >= 60 else ""
+            status.append(" · ")
+            status.append(f"context {a.context_used / 1024:.1f}k/{a.context / 1024:.0f}k ({pct:.0f} %)", style=style)
+        status.append(f" · {state}")
+        self.query_one("#status", Static).update(status)
         prompt = self.query_one("#prompt", Input)
         if a and a.pending and not self.busy:
             prompt.placeholder = "y = apply the proposal · n = reject · or write a correction"
@@ -229,6 +238,8 @@ class StashAI(App):
             if not ok:
                 raise LLMError(msg)
             self.cfg.model = self.agent.llm.model
+            self.agent.llm.num_ctx = self.cfg.num_ctx  # a new model gets its context sized again
+            self.agent.context_used = 0
             ctx = self.agent.check_context()
             self.call_from_thread(self.set_state, "loading the model")
             self.agent.llm.chat([{"role": "system", "content": "Reply with {}"}, {"role": "user", "content": "{}"}],
@@ -303,6 +314,8 @@ class StashAI(App):
             self.call_from_thread(self.say, f"  → {text}", "dim")
         elif kind == "result":
             self.call_from_thread(self.say, f"    {text}", "dim")
+        elif kind == "context":
+            self.call_from_thread(self.set_state, self.state)
 
     def do_ask(self, text: str) -> None:
         try:
@@ -438,6 +451,12 @@ class StashAI(App):
         if self.busy:
             self.cancel.set()
             self.say("Stopping…", "yellow")
+
+    def action_pick_model(self) -> None:
+        if self.busy:
+            self.say("The model is working; press Esc first, then F2.", "yellow")
+        elif self.agent and not self.picking:
+            self.background(self.do_pick_model)
 
     def action_help(self) -> None:
         self.show("Help", HELP.splitlines())

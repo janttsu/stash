@@ -14,6 +14,7 @@ def text_of(log: RichLog) -> str:
 
 
 def test_ask_preview_apply_and_undo(api, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     def step(tool, **args):
         return {"thought": f"calling {tool}", "tool": tool, "args": args}
 
@@ -65,6 +66,8 @@ def test_ask_preview_apply_and_undo(api, tmp_path, monkeypatch):
             assert "Proposal: Delete the bun recipe" in text_of(log_w)
             assert "DELETE  #" in text_of(view) and "Bun recipe" in text_of(view)
             assert len(app.agent.store.bookmarks) == 7
+            status = str(app.query_one("#status").render())
+            assert "context " in status and "k/32k (" in status, status
             await send("y")
             assert "Done: change #" in text_of(log_w) and len(app.agent.store.bookmarks) == 6
             await send("/undo")
@@ -77,6 +80,19 @@ def test_ask_preview_apply_and_undo(api, tmp_path, monkeypatch):
             assert "Unknown command" in text_of(log_w)
             await pilot.press("f1")
             assert "Commands:" in text_of(view)
+            await pilot.press("f2")
+            for _ in range(40):
+                await pilot.pause(0.05)
+                if isinstance(app.screen, tui.ModelPicker):
+                    break
+            assert isinstance(app.screen, tui.ModelPicker), "F2 changes the model mid-session"
+            await pilot.pause(0.2)
+            await pilot.press("escape")
+            for _ in range(40):
+                await pilot.pause(0.05)
+                if not app.busy and not isinstance(app.screen, tui.ModelPicker):
+                    break
+            assert "Model fake ready" in text_of(log_w)
 
     asyncio.run(scenario())
     assert any("APPLIED as change" in x for x in logs)
