@@ -10,8 +10,10 @@ os.environ["STASH_INSECURE_COOKIE"] = "1"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import cli, db  # noqa: E402
-from app.main import app  # noqa: E402
+from app import cli, db, net  # noqa: E402
+from app.main import FAVICONS, app  # noqa: E402
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"icon"
 
 
 def ok(r, status=200):
@@ -143,6 +145,34 @@ with TestClient(app):
     ok(W.post("/api/v1/changes", json={"ops": [{"op": "move", "ids": [blog], "category_id": bob_cat}]}), 404)
     ok(R.get(f"/api/v1/changes/{hist[0]['id']}"))
     ok(TestClient(app, headers={"Authorization": f"Bearer {wkey}"}).get("/api/v1/changes/99999"), 404)
+
+    # --- fetching site icons again ---
+    icons = {"new.example": PNG + b"1", "plain.example": None}
+    fetched = []
+
+    async def fake_favicon(client, host):
+        fetched.append(host)
+        return icons.get(host)
+
+    net.favicon = fake_favicon
+    plain = ok(W.post("/api/v1/changes", json={"ops": [{"op": "create", "url": "https://plain.example/x"}]}))
+    mine = [new_id, plain["diff"][0]["id"]]
+    ok(R.post("/api/v1/favicons/refresh", json={"ids": mine}), 403)  # read-only key
+    rev0 = ok(web.get("/api/me"))["favicon_rev"]
+    res = ok(W.post("/api/v1/favicons/refresh", json={"ids": mine + [bob_bm]}))
+    assert res["sites"] == {"new.example": "new", "plain.example": "missing"}, res
+    assert sorted(fetched) == ["new.example", "plain.example"], "only the user's own sites are fetched"
+    assert (FAVICONS / "new.example").read_bytes() == PNG + b"1"
+    rev1 = ok(web.get("/api/me"))["favicon_rev"]
+    assert rev1 and rev1 != rev0, "a new icon changes the version browsers load icons with"
+    icons["new.example"] = None  # the site lost its icon: the old one stays
+    assert ok(W.post("/api/v1/favicons/refresh", json={"ids": mine}))["sites"]["new.example"] == "kept"
+    assert (FAVICONS / "new.example").read_bytes() == PNG + b"1"
+    icons["new.example"] = PNG + b"1"
+    assert ok(W.post("/api/v1/favicons/refresh", json={"ids": mine}))["counts"]["same"] == 1
+    served = anon.get("/favicon/new.example?v=" + rev1)
+    assert served.status_code == 200 and served.content == PNG + b"1"
+    ok(W.post("/api/v1/favicons/refresh", json={"ids": []}), 422)
 
     # --- revoking ---
     kid = ok(web.get("/api/keys"))["keys"][1]["id"]

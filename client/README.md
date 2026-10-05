@@ -11,6 +11,7 @@ bookmarks, browsing history and requests never reach a cloud service.
 > which bookmarks have no tags? suggest tags for them
 > delete those
 > check whether the links tagged linux still work and fix the moved ones
+> fix the titles and icons of the bookmarks on the Work tab
 > what is behind bookmark 1234? tag it properly
 > bring my most used bookmarks to the Dashboard, most used first
 > which pages do I visit often but have not bookmarked?
@@ -25,7 +26,7 @@ You need Python 3.11+, pipx and Ollama with the model:
 
 ```sh
 ollama pull qwen3.6:35b-a3b
-pipx install --force https://stash.example.com/dl/stashai-0.1.8-py3-none-any.whl   # exact address: Stash → Settings → API keys
+pipx install --force https://stash.example.com/dl/stashai-0.1.9-py3-none-any.whl   # exact address: Stash → Settings → API keys
 stashai login https://stash.example.com      # paste a key that can change
 stashai doctor                                # checks Stash, the model and the context size
 stashai                                       # the terminal UI: first asks which local model to use
@@ -82,6 +83,12 @@ The principles come from sorto, a local-LLM file sorter by the same author:
 - **The web.** The model can read a page as text (`fetch`: status, redirects, title, description, headings,
   text), check all links of a set at once (`check`: alive / moved / dead / unclear) and search the web
   (`web_search`: DuckDuckGo or your own SearXNG). Moved links can be given their new address (`update_urls`).
+  `refresh` fixes titles and site icons in one go: it reads only the start of each page (up to `</head>`),
+  16 pages at a time, while Stash fetches the icons of the same sites again. Each bookmark gets its page's own
+  `<title>`; error, block and login pages are skipped, and `only_bad` limits it to titles that are empty or
+  just the address. When titles would change, the proposal comes straight from the tool without another model
+  call. Icons are a cache on the server, not bookmark data, so they are refreshed right away (a working icon is
+  only replaced by a working new one); titles change only when you accept.
   A link that redirects to a front page or a login is "unclear", not "moved", and "dead" means only 404/410, no
   such host or a refused connection. Requests go from your own computer (pages behind your VPN work), but never
   to this computer's own addresses, and not to the local network unless `allow_private` is set. Page text is

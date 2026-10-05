@@ -23,6 +23,7 @@ MESSAGES = {
     "conflict": "later changes touched the same bookmarks",
     "already_undone": "this change has already been undone",
     "too_many_attempts": "too many failed attempts, try again in a few minutes",
+    "too_many_sites": "too many sites in one icon refresh",
 }
 
 
@@ -71,6 +72,10 @@ class StashAPI:
 
     def changes(self, ops: list[dict], summary: str, *, dry_run: bool) -> dict:
         return self._call("POST", "/changes", json={"ops": ops, "summary": summary[:500], "dry_run": dry_run})
+
+    def refresh_icons(self, ids: list[int]) -> dict:
+        """Stash fetches the site icons of these bookmarks again: {"sites": {host: status}, "counts": {...}}."""
+        return self._call("POST", "/favicons/refresh", json={"ids": ids}, timeout=180.0)
 
     def usage(self) -> dict:
         """{"usage": {bookmark id: visit counts}, "sources": [...]} from the browsing history."""

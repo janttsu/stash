@@ -23,6 +23,8 @@ import httpx
 
 BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36"
 MAX_BYTES = 2_000_000
+HEAD_BYTES = 300_000      # enough for <head> on nearly every page; titles need nothing more
+_META_CHARSET = re.compile(rb"<meta[^>]+charset=[\"']?([\w-]+)", re.I)
 REDIRECTS = (301, 302, 303, 307, 308)
 SKIP_TAGS = {"script", "style", "noscript", "svg", "template", "iframe", "head"}
 BLOCK_TAGS = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "tr", "section", "article", "header", "footer", "pre"}
@@ -40,7 +42,8 @@ class Page:
     error: str = ""
     redirects: list[str] = field(default_factory=list)
     content_type: str = ""
-    title: str = ""
+    title: str = ""          # og:title first: what the page is about
+    html_title: str = ""     # the <title> itself: what a browser puts in a bookmark
     description: str = ""
     lang: str = ""
     headings: list[str] = field(default_factory=list)
@@ -109,6 +112,7 @@ class _Extract(HTMLParser):
         self.parts: list[str] = []
         self._skip = 0
         self._in_title = False
+        self._title_done = False  # only the first <title>, not those inside inline SVG icons
         self._heading: list[str] | None = None
 
     def handle_starttag(self, tag, attrs):
@@ -119,7 +123,7 @@ class _Extract(HTMLParser):
             key = (a.get("property") or a.get("name") or "").lower()
             if key in ("description", "og:title", "og:description", "twitter:title") and a.get("content"):
                 self.meta.setdefault(key, a["content"])
-        if tag == "title":
+        if tag == "title" and not self._title_done and not self._skip:
             self._in_title = True
         if tag in SKIP_TAGS and tag != "head":
             self._skip += 1
@@ -129,8 +133,9 @@ class _Extract(HTMLParser):
             self.parts.append("\n")
 
     def handle_endtag(self, tag):
-        if tag == "title":
+        if tag == "title" and self._in_title:
             self._in_title = False
+            self._title_done = True
         if tag in SKIP_TAGS and tag != "head" and self._skip:
             self._skip -= 1
         if tag in ("h1", "h2") and self._heading is not None:
@@ -155,6 +160,18 @@ class _Extract(HTMLParser):
         return "\n".join(line for line in lines if len(line) > 1)
 
 
+def decode(raw: bytes, header_charset: str | None) -> str:
+    """The charset from the Content-Type header, else from <meta charset>, else UTF-8."""
+    m = None if header_charset else _META_CHARSET.search(raw[:4096])
+    for charset in (header_charset, m and m.group(1).decode("ascii", "ignore")):
+        if charset:
+            try:
+                return raw.decode(charset, "replace")
+            except LookupError:
+                pass
+    return raw.decode("utf-8", "replace")
+
+
 def parse_html(page: Page, body: str) -> None:
     ex = _Extract()
     try:
@@ -163,6 +180,7 @@ def parse_html(page: Page, body: str) -> None:
     except Exception:  # noqa: BLE001  (broken HTML still gives what was read)
         pass
     page.title = " ".join((ex.meta.get("og:title") or ex.title or ex.meta.get("twitter:title") or "").split())[:300]
+    page.html_title = " ".join(ex.title.split())[:300]
     page.description = " ".join((ex.meta.get("description") or ex.meta.get("og:description") or "").split())[:500]
     page.lang = ex.lang
     page.headings = ex.headings[:12]
@@ -210,11 +228,13 @@ class Web:
             raise Blocked(f"{p.hostname} is on {where}; not fetched"
                           + ("" if where == "this computer" else " (set [web] allow_private = true to allow)"))
 
-    def fetch(self, url: str, *, body: bool = True) -> Page:
-        key = f"{url}#{int(body)}"
+    def fetch(self, url: str, *, body: bool = True, head_only: bool = False) -> Page:
+        """head_only reads the page only up to </head> (titles, description), which is far less to download."""
+        key = f"{url}#{'head' if head_only else int(body)}"
         with self._lock:
-            if key in self.cache:
-                return self.cache[key]
+            for k in (key, f"{url}#1") if head_only else (key,):  # a whole page read earlier has the head too
+                if k in self.cache:
+                    return self.cache[k]
         page = Page(url=url)
         current = url
         try:
@@ -237,11 +257,12 @@ class Web:
                         if body and ("html" in page.content_type or "xml" in page.content_type
                                      or page.content_type.startswith("text/")):
                             raw = bytearray()
+                            limit = HEAD_BYTES if head_only else MAX_BYTES
                             for chunk in r.iter_bytes():
                                 raw += chunk
-                                if len(raw) > MAX_BYTES:
+                                if len(raw) > limit or (head_only and b"</head" in raw[-len(chunk) - 7:].lower()):
                                     break
-                            text = bytes(raw).decode(r.encoding or "utf-8", "replace")
+                            text = decode(bytes(raw), r.charset_encoding)
                             if "html" in page.content_type or "<html" in text[:2000].lower():
                                 parse_html(page, text)
                             else:
@@ -264,11 +285,13 @@ class Web:
         return page
 
     def check_many(self, urls: list[str], *, cancel: threading.Event | None = None,
-                   progress: Callable[[int, int], None] | None = None, workers: int = 8) -> dict[str, Page]:
+                   progress: Callable[[int, int], None] | None = None, workers: int = 8,
+                   head_only: bool = False) -> dict[str, Page]:
         out: dict[str, Page] = {}
         done = 0
         with ThreadPoolExecutor(workers) as pool:
-            futures = {u: pool.submit(lambda u=u: None if cancel and cancel.is_set() else self.fetch(u)) for u in urls}
+            futures = {u: pool.submit(lambda u=u: None if cancel and cancel.is_set()
+                                      else self.fetch(u, head_only=head_only)) for u in urls}
             for u, f in futures.items():
                 page = f.result()
                 done += 1

@@ -263,7 +263,9 @@ export function favicon(url, enabled = true) {
   const host = hostOf(url);
   const letter = () => h('span', { class: 'fav fav--letter' }, (host.replace(/^www\./, '')[0] || '?').toUpperCase());
   if (!host || !enabled) return letter();
-  const img = h('img', { class: 'fav', alt: '', loading: 'lazy', width: 16, height: 16, src: `/favicon/${encodeURIComponent(host)}` });
+  // the version changes when icons are fetched again, so browsers do not keep showing a cached old one
+  const rev = state.user?.favicon_rev ? `?v=${encodeURIComponent(state.user.favicon_rev)}` : '';
+  const img = h('img', { class: 'fav', alt: '', loading: 'lazy', width: 16, height: 16, src: `/favicon/${encodeURIComponent(host)}${rev}` });
   img.addEventListener('error', () => img.replaceWith(letter()), { once: true });
   return img;
 }
