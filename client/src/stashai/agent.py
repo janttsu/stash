@@ -7,7 +7,6 @@ accepts. Every accepted change is a changeset in Stash that can be undone.
 from __future__ import annotations
 
 import json
-import re
 import threading
 import time
 from collections.abc import Callable
@@ -18,7 +17,7 @@ from stashai import prompts
 from stashai.api import StashAPI, StashError
 from stashai.llm import LLM, Cancelled, LLMError, extract_json
 from stashai.store import Store
-from stashai.web import Web, moved
+from stashai.web import Web, page_title, unnamed_title
 
 Emit = Callable[[str, str], None]
 SET_OPS = {"add_tags", "remove_tags", "set_tags", "delete", "move"}
@@ -30,16 +29,6 @@ ALIASES = {"query": "text", "q": "text", "keywords": "text", "words": "text", "t
            "tag": "tags_any", "site": "host", "domain": "host", "domains": "host", "hosts": "host", "set": "in_set"}
 MIN_CONTEXT = 16384
 ICON_SITES_PER_CALL = 40
-# titles of error, block and login pages: never worth putting on a bookmark. The short words count only as the
-# whole title ("Error", "404 Not Found"), so a real title such as "Error handling in Rust" is kept.
-JUNK_TITLE = re.compile(
-    r"^\W*(\d{3}\W*)?(error|forbidden|not found|page not found|access denied|unauthorized|sign[ -]?in|log[ -]?in|"
-    r"untitled|loading|redirecting|bad gateway|service unavailable|too many requests|document moved|"
-    r"moved permanently|object moved)?\W*$"
-    r"|^(just a moment|attention required|are you a (robot|human)|one more step|security check|request rejected|"
-    r"checking your browser|ddos-guard|captcha|page not found|access denied|\d{3}\W+(error|not found|forbidden))", re.I)
-
-
 @dataclass
 class Plan:
     summary: str
@@ -428,13 +417,13 @@ class Agent:
             worker.start()
         lines, changed = [], []
         if titles:
-            targets = [i for i in ids if not only_bad or self.bad_title(i)]
+            targets = [i for i in ids if not only_bad or self.unnamed(i)]
             urls = {i: self.store.bookmarks[i].url for i in targets}
             pages = self.web.check_many(list(dict.fromkeys(urls.values())), cancel=cancel, workers=16, head_only=True,
                                         progress=lambda d, n: emit("status", f"reading titles {d}/{n}"))
             unread, same = [], 0
             for i in targets:
-                title = self.page_title(pages.get(urls[i]))
+                title = page_title(pages.get(urls[i]))
                 if title is None:
                     unread.append(i)
                 elif title == self.store.bookmarks[i].title:
@@ -489,25 +478,10 @@ class Agent:
             return
         out["counts"] = counts
 
-    def bad_title(self, i: int) -> bool:
-        """A title that is missing or only repeats the address."""
+    def unnamed(self, i: int) -> bool:
+        """A bookmark whose title is missing or only repeats its address."""
         b = self.store.bookmarks[i]
-        t = b.title.strip().lower().rstrip("/")
-        url = b.url.lower().rstrip("/")
-        return not t or t in (url, url.split("://", 1)[-1], b.host, b.host.removeprefix("www.")) \
-            or t.startswith(("http://", "https://", "www."))
-
-    @staticmethod
-    def page_title(page) -> str | None:
-        """The page's own title, or None when the page did not answer with a real page of its own."""
-        if page is None or page.error or not page.status or page.status >= 400:
-            return None
-        if moved(page.url, page.final_url) and page.weak_move:  # sent to a login page or the front page
-            return None
-        title = (page.html_title or page.title).strip()
-        if not title or JUNK_TITLE.match(title):
-            return None
-        return title[:500]
+        return unnamed_title(b.title, b.url, b.host)
 
     def tool_web_search(self, args: dict, cancel: threading.Event, emit: Emit) -> str:
         query = str(args.get("query") or "").strip()

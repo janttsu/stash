@@ -105,6 +105,39 @@ def moved(url: str, final: str) -> bool:
     return bool(final) and _norm(url) != _norm(final)
 
 
+# titles of error, block and login pages: never worth putting on a bookmark. The short words count only as the
+# whole title ("Error", "404 Not Found"), so a real title such as "Error handling in Rust" is kept.
+JUNK_TITLE = re.compile(
+    r"^\W*(\d{3}\W*)?(error|forbidden|not found|page not found|access denied|unauthorized|sign[ -]?in|log[ -]?in|"
+    r"untitled|loading|redirecting|bad gateway|service unavailable|too many requests|document moved|"
+    r"moved permanently|object moved)?\W*$"
+    r"|^(just a moment|attention required|are you a (robot|human)|one more step|security check|request rejected|"
+    r"checking your browser|ddos-guard|captcha|page not found|access denied|\d{3}\W+(error|not found|forbidden))", re.I)
+
+
+def page_title(page) -> str | None:
+    """A page's real title, or None when it did not answer with a real page of its own (error, block, login)."""
+    if page is None or page.error or not page.status or page.status >= 400:
+        return None
+    if moved(page.url, page.final_url) and page.weak_move:  # sent to a login page or the front page
+        return None
+    title = (page.html_title or page.title).strip()
+    if not title or JUNK_TITLE.match(title):
+        return None
+    return title[:500]
+
+
+def unnamed_title(title: str, url: str, host: str) -> bool:
+    """A title that is missing or only repeats the address, so the real page title is an improvement."""
+    t = (title or "").strip().casefold().rstrip("/")
+    if not t:
+        return True
+    u = (url or "").casefold().rstrip("/")
+    host = (host or "").casefold()
+    return t in (u, u.split("://", 1)[-1], host, host.removeprefix("www.")) \
+        or t.startswith(("http://", "https://", "www."))
+
+
 class _Extract(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)

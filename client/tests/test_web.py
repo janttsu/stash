@@ -217,6 +217,46 @@ def test_agent_refreshes_titles_and_icons(api, monkeypatch):
     assert "(titles not read, 1): #" in result
 
 
+def titles_of(api):
+    return {b["id"]: b["title"] for b in api.snapshot()["bookmarks"]}
+
+
+def test_titles_command_fixes_unnamed_then_all(api):
+    from stashai import cli
+
+    made = api.changes([{"op": "create", "url": u, "title": t} for u, t in [
+        ("https://site.example/buns", "https://site.example/buns"),   # unnamed: just the address
+        ("https://site.example/tea", "A title I wrote"),              # named, but the page differs
+        ("https://site.example/forbidden", "Keep me"),               # 403: unreadable, must stay
+        ("https://site.example/blocked", "https://site.example/blocked"),  # junk page title, must stay
+    ]], "seed", dry_run=False)
+    ids = [e["id"] for e in made["diff"]]
+    buns, tea, forbidden, blocked = ids
+
+    # default: only the empty / address-only title is filled, from the page read on this computer
+    rc = cli.cmd_titles(None, every=False, host=None, tag=None, icons=False, dry_run=False, yes=True,
+                        limit=0, workers=4, api=api, web=web())
+    assert rc == 0
+    now = titles_of(api)
+    assert now[buns] == "Old title"  # the page's own <title>; og:title is only a fallback
+    assert now[tea] == "A title I wrote", "a title the user wrote is left alone without --all"
+    assert now[forbidden] == "Keep me" and now[blocked] == "https://site.example/blocked"
+
+    # --all re-reads every match, so the present-but-wrong title is corrected too
+    rc = cli.cmd_titles(None, every=True, host=None, tag=None, icons=False, dry_run=False, yes=True,
+                        limit=0, workers=4, api=api, web=web())
+    assert titles_of(api)[tea] == "Green tea – Teas"
+
+    # dry run changes nothing; host filter narrows the set
+    api.changes([{"op": "update", "id": tea, "title": "https://site.example/tea"}], "bad again", dry_run=False)
+    rc = cli.cmd_titles(None, every=False, host="nowhere.example", tag=None, icons=False, dry_run=False,
+                        yes=True, limit=0, workers=4, api=api, web=web())
+    assert titles_of(api)[tea] == "https://site.example/tea", "no bookmark on that host, so nothing changed"
+    rc = cli.cmd_titles(None, every=False, host="site.example", tag=None, icons=False, dry_run=True,
+                        yes=True, limit=0, workers=4, api=api, web=web())
+    assert titles_of(api)[tea] == "https://site.example/tea", "dry run leaves the database untouched"
+
+
 def test_web_can_be_turned_off(api):
     agent = Agent(api=api, store=Store(), llm=FakeLLM([step("fetch", url="https://site.example/"),
                                                        step("answer", message="ok")]))
