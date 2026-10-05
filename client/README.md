@@ -26,7 +26,7 @@ You need Python 3.11+, pipx and Ollama with the model:
 
 ```sh
 ollama pull qwen3.6:35b-a3b
-pipx install --force https://stash.example.com/dl/stashai-0.1.9-py3-none-any.whl   # exact address: Stash → Settings → API keys
+pipx install --force https://stash.example.com/dl/stashai-0.1.10-py3-none-any.whl   # exact address: Stash → Settings → API keys
 stashai login https://stash.example.com      # paste a key that can change
 stashai doctor                                # checks Stash, the model and the context size
 stashai                                       # the terminal UI: first asks which local model to use
@@ -61,6 +61,23 @@ Get an API key from Stash: Settings → API keys → Create API key. It is saved
 Without the UI: `stashai ask "request" [-m MODEL]` (the model from the config unless given; asks before
 changing anything; `--yes` applies right away),
 `stashai history`, `stashai undo [ID]`.
+
+### Fixing titles from another computer
+
+`stashai titles` reads each page **from the computer it runs on** and gives bookmarks their pages' real
+titles. No language model is involved, so it is light and fits a scheduled job. Because the page is fetched
+locally, a title your Stash server cannot get from where it runs (for example a site that only answers in
+certain countries) can be fixed simply by running the command on a computer there.
+
+```sh
+stashai titles                 # fill in empty or address-only titles, ask before applying
+stashai titles --all           # re-read every bookmark and fix any whose page now has a different title
+stashai titles --host x.com    # only that site (subdomains included);  --tag news  only that tag
+stashai titles --all --yes     # apply without asking (for cron);  --dry-run shows the changes only
+```
+
+Titles the page cannot give (errors, login or placeholder pages) are left as they are, and every change can be
+undone with `stashai undo`. `--icons` additionally asks the Stash server to fetch the site icons again.
 
 ### Your own rules
 

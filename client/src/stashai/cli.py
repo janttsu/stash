@@ -6,7 +6,12 @@
   stashai doctor                check the connection to Stash and the model
   stashai history               the latest changes made with API keys
   stashai undo [ID] [--force]   undo the latest change (or change ID)
+  stashai titles [--all] [--host H] [--tag T] [--yes]   give bookmarks their pages' real titles
   stashai update                install the newest stashai from your Stash
+
+`titles` reads each page from this computer, so run it where the pages open: titles that your Stash server
+cannot fetch from where it runs (for example a site that only answers in some countries) can be fixed by
+running it on a machine there. No language model is needed, so it also fits a scheduled job.
 """
 from __future__ import annotations
 
@@ -135,6 +140,108 @@ def cmd_ask(cfg: Config, request: str, yes: bool) -> int:
     return 0
 
 
+def cmd_titles(cfg: Config, *, every: bool, host: str | None, tag: str | None, icons: bool,
+               dry_run: bool, yes: bool, limit: int, workers: int, api=None, web=None) -> int:
+    """Fetch page titles from THIS computer and give them to the matching bookmarks.
+
+    By default only bookmarks whose title is empty or just the address are touched; --all re-reads every
+    matching bookmark and updates the ones whose page now has a different real title. Pages this computer
+    cannot reach, and error/login/placeholder pages, are left as they are."""
+    from stashai.api import StashAPI, StashError
+    from stashai.web import Web, page_title, unnamed_title
+
+    if api is None:
+        if not cfg.stash_url or not cfg.api_key:
+            raise SystemExit("Not signed in. Run: stashai login https://your-stash.example")
+        api = StashAPI(cfg.stash_url, cfg.api_key)
+    try:
+        books = api.snapshot()["bookmarks"]
+    except StashError as e:
+        print(f"Could not reach Stash: {e.code}", file=sys.stderr)
+        return 1
+
+    def host_hit(h: str) -> bool:
+        h = (h or "").lower()
+        want = host.lower().lstrip(".")
+        return h == want or h.endswith("." + want)
+
+    targets = []
+    for b in books:
+        if not b["url"].lower().startswith(("http://", "https://")):
+            continue
+        if host and not host_hit(b.get("host") or ""):
+            continue
+        if tag and tag not in (b.get("tags") or []):
+            continue
+        if not every and not unnamed_title(b["title"], b["url"], b.get("host") or ""):
+            continue
+        targets.append(b)
+    if limit:
+        targets = targets[:limit]
+    if not targets:
+        print("No matching bookmarks.")
+        return 0
+
+    if web is None:
+        web = Web(allow_private=cfg.web_private, search="off")
+    print(f"Reading {len(targets)} page{'s' if len(targets) != 1 else ''} from this computer…", file=sys.stderr)
+    done = [0]
+
+    def progress(d, n):
+        done[0] = d
+        print(f"\r\033[K… {d}/{n}", end="", file=sys.stderr, flush=True)
+
+    pages = web.check_many([b["url"] for b in targets], workers=workers, head_only=True, progress=progress)
+    print("\r\033[K", end="", file=sys.stderr)
+
+    changes, unread = [], 0
+    for b in targets:
+        title = page_title(pages.get(b["url"]))
+        if title is None:
+            unread += 1
+        elif title != b["title"]:
+            changes.append({"op": "update", "id": b["id"], "title": title})
+            print(f"#{b['id']}  {b['title'][:60]!r}\n      → {title[:70]!r}")
+    print(f"\n{len(changes)} title{'s' if len(changes) != 1 else ''} would change; "
+          f"{len(targets) - len(changes) - unread} already right, {unread} could not be read.")
+
+    if icons:
+        ids = [b["id"] for b in targets]
+        got = {"new": 0, "same": 0, "kept": 0, "missing": 0}
+        try:
+            for part in (ids[i:i + 60] for i in range(0, len(ids), 60)):
+                for k, v in api.refresh_icons(part)["counts"].items():
+                    got[k] = got.get(k, 0) + v
+            print(f"Icons: {got['new']} new, {got['same']} unchanged, {got['kept']} kept, {got['missing']} "
+                  "sites without one (icons are fetched by the Stash server, not this computer).")
+        except StashError as e:
+            print(f"Icons: not refreshed ({e.code}).", file=sys.stderr)
+
+    if not changes:
+        return 0
+    if dry_run:
+        print("Dry run: nothing was changed.")
+        return 0
+    if not yes:
+        try:
+            yes = input("\nApply these title changes? [y/N] ").strip().lower() in ("y", "yes", "k", "kyllä")
+        except EOFError:
+            yes = False
+    if not yes:
+        print("Nothing was changed.")
+        return 0
+    applied = 0
+    for part in (changes[i:i + 500] for i in range(0, len(changes), 500)):
+        try:
+            res = api.changes(part, "stashai titles: refreshed page titles", dry_run=False)
+        except StashError as e:
+            print(f"Stash refused the changes: {e.code}", file=sys.stderr)
+            return 1
+        applied += res["counts"]["updated"]
+    print(f"Done: {applied} title{'s' if applied != 1 else ''} updated.")
+    return 0
+
+
 def newer_version(stash_url: str) -> tuple[str, str] | None:
     """(version, wheel url) when Stash offers a newer stashai than this one."""
     import httpx
@@ -231,6 +338,16 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("undo")
     s.add_argument("id", nargs="?", type=int)
     s.add_argument("--force", action="store_true", help="also when later changes touched the same bookmarks")
+    s = sub.add_parser("titles")
+    s.add_argument("--all", dest="every", action="store_true",
+                   help="re-read every matching bookmark, not only those with an empty or address-only title")
+    s.add_argument("--host", help="only bookmarks on this site (subdomains included)")
+    s.add_argument("--tag", help="only bookmarks with this tag")
+    s.add_argument("--icons", action="store_true", help="also have the Stash server fetch the site icons again")
+    s.add_argument("--dry-run", action="store_true", help="show what would change, change nothing")
+    s.add_argument("--yes", action="store_true", help="apply without asking (for scheduled runs)")
+    s.add_argument("--limit", type=int, default=0, help="at most this many bookmarks")
+    s.add_argument("--workers", type=int, default=16, help="pages to read at once (default 16)")
     s = sub.add_parser("update")
     s.add_argument("url", nargs="?", help="the Stash address (default: the one you logged in to)")
     s.add_argument("--check", action="store_true", help="only tell whether a newer version exists")
@@ -250,6 +367,9 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_history(cfg)
         if args.cmd == "undo":
             return cmd_undo(cfg, args.id, args.force)
+        if args.cmd == "titles":
+            return cmd_titles(cfg, every=args.every, host=args.host, tag=args.tag, icons=args.icons,
+                              dry_run=args.dry_run, yes=args.yes, limit=args.limit, workers=args.workers)
         if args.cmd == "update":
             return cmd_update(cfg, args.url, args.check)
         from stashai.tui import run
