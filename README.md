@@ -22,6 +22,9 @@ you get real use out of your browsing history without handing it to anyone.
    - **Catalog**: a tagged store with fast search.
    - Import and export as a browser bookmarks file, sharing a tab by link, finding duplicates and dead links,
      a bookmarklet, a browser extension, two-factor authentication and invitation-based registration.
+   - **Keeps itself tidy.** In the background Stash slowly re-checks bookmarks on its own, so you rarely have to
+     run the duplicate or dead-link tools by hand (see *Background upkeep* below). Each account can switch this
+     off in Settings.
    - The web UI and the browser extension speak **English, Finnish and Swedish** (Settings → Language, or the
      browser's language).
    - **API** (`/api/v1`) with API keys: all bookmarks at once, search, and changes with exact previews.
@@ -89,7 +92,7 @@ the server configuration instead (for example in the systemd unit), set `STASH_R
 While the variable is set, the setting in Settings → Users and registration is shown but cannot be changed.
 
 Environment variables: `STASH_ORIGIN` (public address), `STASH_DATA` (data directory, default `./data`),
-`STASH_REGISTRATION` (see above).
+`STASH_REGISTRATION` (see above), `STASH_MAINTENANCE` (`off` turns the background upkeep off; see below).
 
 ## The API and stashai
 
@@ -124,6 +127,24 @@ Settings → Changes made with API keys.
 Site icons are a cache shared by all accounts. A refresh fetches only sites the caller has bookmarked, never
 replaces a working icon with a failure, and changes the icon version the web UI loads icons with, so browsers
 show a new icon at once instead of keeping their week-long cached copy.
+
+## Background upkeep
+
+Stash keeps bookmarks in order on its own, so you seldom need the duplicate or dead-link tools by hand. A slow
+loop inside the server works through a small batch every few minutes:
+
+- **Dead links.** A page that answers 404/410, or whose domain no longer resolves, is re-checked over several
+  rounds; once it has failed a few times in a row it gets the `dead-link` tag, and the tag is removed again as
+  soon as the page answers normally. A link that only times out, or is behind a login, is never tagged, so the
+  mark stays trustworthy. The dead state is stored per bookmark.
+- **Duplicates.** When two bookmarks share the same address, every copy after the oldest keeps the `duplicate`
+  tag. The tag is kept in step with the bookmarks and clears by itself once the extra copies are gone.
+- **Titles and icons.** A bookmark whose title is empty or just its own address is given the page's real title,
+  and site icons are fetched again. A title you have written is left untouched, and a page the server cannot
+  reach from where it runs keeps whatever title it already has.
+
+These edits are made directly (like the manual tools), so they do not fill the undo history. Each account can
+turn the whole thing off in Settings → Bookmarks, and `STASH_MAINTENANCE=off` disables it for the whole server.
 
 Browsing history is matched to bookmarks loosely (http/https, `www.` and a trailing slash do not matter). Each
 device sends visit counts per address (last 30, 90 and 365 days, and all), and a new sync replaces that

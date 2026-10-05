@@ -266,6 +266,8 @@ export const FI = {
   'Open links in a new browser tab': 'Avaa linkit uuteen selaimen välilehteen',
   'Auto-tag when moving to the Catalog': 'Lisää tunnisteet automaattisesti Katalogiin siirrettäessä',
   'The tab and category names are added as tags, so the bookmark stays easy to find.': 'Välilehden ja kategorian nimet lisätään tunnisteiksi, jotta kirjanmerkki löytyy jatkossakin helposti.',
+  'Keep bookmarks tidy automatically': 'Pidä kirjanmerkit kunnossa automaattisesti',
+  'Stash checks now and then by itself: missing titles get the real page title, site icons are fetched again, pages that are gone get the dead-link tag, and extra copies of the same address get the duplicate tag. The tags clear on their own when no longer needed.': 'Stash tarkistaa aika ajoin itse: puuttuvat otsikot saavat sivun oikean otsikon, kuvakkeet haetaan uudelleen, kadonneet sivut saavat dead-link-tunnisteen ja saman osoitteen ylimääräiset kopiot duplicate-tunnisteen. Tunnisteet poistuvat itsestään, kun niille ei ole enää tarvetta.',
   'Add to Stash': 'Lisää Stashiin',
   'Add to Stash button': 'Lisää Stashiin -painike',
   'Drag me to the bookmarks bar': 'Vedä minut kirjanmerkkipalkkiin',

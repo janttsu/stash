@@ -243,6 +243,8 @@ export const SV = {
   "Open links in a new browser tab": "Öppna länkar i en ny webbläsarflik",
   "Auto-tag when moving to the Catalog": "Tagga automatiskt vid flytt till katalogen",
   "The tab and category names are added as tags, so the bookmark stays easy to find.": "Flikens och kategorins namn läggs till som taggar, så att bokmärket fortsatt är lätt att hitta.",
+  "Keep bookmarks tidy automatically": "Håll bokmärkena i ordning automatiskt",
+  "Stash checks now and then by itself: missing titles get the real page title, site icons are fetched again, pages that are gone get the dead-link tag, and extra copies of the same address get the duplicate tag. The tags clear on their own when no longer needed.": "Stash kontrollerar då och då på egen hand: titlar som saknas får sidans riktiga titel, ikoner hämtas på nytt, sidor som försvunnit får taggen dead-link och extra kopior av samma adress får taggen duplicate. Taggarna försvinner av sig själva när de inte längre behövs.",
   "Add to Stash": "Lägg till i Stash",
   "Add to Stash button": "Knappen Lägg till i Stash",
   "Drag me to the bookmarks bar": "Dra mig till bokmärkesfältet",
