@@ -36,8 +36,8 @@ Commands:
   /sets                the result sets of this session      /show S3   list a set
   /refresh             load the bookmarks again              /new       forget this conversation
   /rules               your rules file                       /model [NAME]  (F2: choose from a list)
-  /quit
-Keys: Esc stops the model · F2 changes the model · PgUp/PgDn scroll the right pane · Ctrl+Q quits
+  q                    quit stashai (or /quit)
+Keys: Esc stops the model · F2 changes the model · PgUp/PgDn scroll the right pane · q (or Ctrl+Q) quits
 The status line shows how full the model's context was at its latest step (yellow from 60 %, red from 85 %);
 older tool results are shortened automatically when it fills up, and every request starts afresh."""
 
@@ -175,7 +175,7 @@ class StashAI(App):
         elif self.busy:
             prompt.placeholder = "The model is working… (Esc stops it)"
         else:
-            prompt.placeholder = "What should be done? (F1 = help)"
+            prompt.placeholder = "What should be done? (F1 = help · q = quit)"
 
     def on_mount(self) -> None:
         self.set_state("starting")
@@ -271,6 +271,9 @@ class StashAI(App):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
         event.input.value = ""
+        if text.lower() in ("q", "quit", "exit", "/q", "/quit", "/exit"):
+            self.exit()
+            return
         if self.busy:
             self.say("The model is still working; press Esc to stop it first.", "yellow")
             return

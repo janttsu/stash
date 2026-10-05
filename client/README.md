@@ -26,7 +26,7 @@ You need Python 3.11+, pipx and Ollama with the model:
 
 ```sh
 ollama pull qwen3.6:35b-a3b
-pipx install --force https://stash.example.com/dl/stashai-0.1.10-py3-none-any.whl   # exact address: Stash → Settings → API keys
+pipx install --force https://stash.example.com/dl/stashai-0.1.11-py3-none-any.whl   # exact address: Stash → Settings → API keys
 stashai login https://stash.example.com      # paste a key that can change
 stashai doctor                                # checks Stash, the model and the context size
 stashai                                       # the terminal UI: first asks which local model to use
@@ -54,8 +54,8 @@ Get an API key from Stash: Settings → API keys → Create API key. It is saved
 - On the left: the conversation and the model's steps. On the right: results and proposals.
 - A proposal shows every change (tags +/-, moves, new order, deletions). **y** or an empty Enter applies it,
   **n** rejects it, or write a correction instead ("don't delete the ones tagged x").
-- **Esc** stops the model, **F2** changes the model, **PgUp/PgDn** scroll the right pane, **F1** help,
-  **Ctrl+Q** quits.
+- **Esc** stops the model, **F2** changes the model, **PgUp/PgDn** scroll the right pane, **F1** help.
+- **q** (or **Ctrl+Q**) quits.
 - Commands: `/undo [ID] [force]`, `/history`, `/sets`, `/show S3`, `/refresh`, `/new`, `/rules`, `/model NAME`.
 
 Without the UI: `stashai ask "request" [-m MODEL]` (the model from the config unless given; asks before
