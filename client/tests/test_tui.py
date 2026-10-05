@@ -103,6 +103,49 @@ def test_ask_preview_apply_and_undo(api, tmp_path, monkeypatch):
     assert any("APPLIED as change" in x for x in logs)
 
 
+def test_q_quits(api, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+    class Log:
+        path = tmp_path / "session.log"
+
+        def __call__(self, text):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cli, "newer_version", lambda url: None)
+    monkeypatch.setattr(cli, "build", lambda cfg: (Agent(api=api, llm=FakeLLM([]), store=Store(), log=Log()), Log()))
+    cfg = Config(stash_url="https://stash.test", api_key="k", model="fake", model_chosen=True,
+                 rules_path=tmp_path / "rules.md")
+
+    async def scenario():
+        app = tui.StashAI(cfg)
+        async with app.run_test(size=(160, 40)) as pilot:
+            for _ in range(60):
+                await pilot.pause(0.05)
+                if app.ready and not app.busy:
+                    break
+            quit_calls = []
+            monkeypatch.setattr(app, "exit", lambda *a, **k: quit_calls.append(True))
+
+            async def send(text):
+                app.query_one("#prompt").value = text
+                await pilot.press("enter")
+                await pilot.pause(0.05)
+
+            app.busy = True  # so an ordinary word is not sent to the model during the test
+            await send("python testing")
+            assert not quit_calls, "an ordinary request does not quit"
+            await send("q")
+            assert quit_calls == [True], "a bare q quits"
+            await send("quit")
+            assert quit_calls == [True, True], "and so does the word quit"
+
+    asyncio.run(scenario())
+
+
 def test_asks_for_the_model_when_none_was_given(api, tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     llm = FakeLLM([])
