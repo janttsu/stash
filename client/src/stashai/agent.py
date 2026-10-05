@@ -7,6 +7,7 @@ accepts. Every accepted change is a changeset in Stash that can be undone.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -17,17 +18,26 @@ from stashai import prompts
 from stashai.api import StashAPI, StashError
 from stashai.llm import LLM, Cancelled, LLMError, extract_json
 from stashai.store import Store
-from stashai.web import Web
+from stashai.web import Web, moved
 
 Emit = Callable[[str, str], None]
 SET_OPS = {"add_tags", "remove_tags", "set_tags", "delete", "move"}
-ALL_OPS = SET_OPS | {"rename_tag", "update", "create", "update_urls", "tag_each", "order_bookmarks",
-                     "order_categories", "sort_by_use"}
+ALL_OPS = SET_OPS | {"rename_tag", "update", "create", "update_urls", "update_titles", "tag_each",
+                     "order_bookmarks", "order_categories", "sort_by_use"}
 RESULT_CHARS = 6000
 # names models tend to use for search fields
 ALIASES = {"query": "text", "q": "text", "keywords": "text", "words": "text", "terms": "text", "tags": "tags_any",
            "tag": "tags_any", "site": "host", "domain": "host", "domains": "host", "hosts": "host", "set": "in_set"}
 MIN_CONTEXT = 16384
+ICON_SITES_PER_CALL = 40
+# titles of error, block and login pages: never worth putting on a bookmark. The short words count only as the
+# whole title ("Error", "404 Not Found"), so a real title such as "Error handling in Rust" is kept.
+JUNK_TITLE = re.compile(
+    r"^\W*(\d{3}\W*)?(error|forbidden|not found|page not found|access denied|unauthorized|sign[ -]?in|log[ -]?in|"
+    r"untitled|loading|redirecting|bad gateway|service unavailable|too many requests|document moved|"
+    r"moved permanently|object moved)?\W*$"
+    r"|^(just a moment|attention required|are you a (robot|human)|one more step|security check|request rejected|"
+    r"checking your browser|ddos-guard|captcha|page not found|access denied|\d{3}\W+(error|not found|forbidden))", re.I)
 
 
 @dataclass
@@ -67,6 +77,7 @@ class Agent:
     context_used: int = 0    # tokens of the latest conversation step (prompt + answer)
     web: Web | None = None
     moved_to: dict[int, str] = field(default_factory=dict)   # bookmark id -> new address found by check
+    new_titles: dict[int, str] = field(default_factory=dict)  # bookmark id -> page title found by refresh
 
     # --- setup -----------------------------------------------------------------
 
@@ -133,8 +144,9 @@ class Agent:
                     continue
                 if tool == "answer":
                     return self.finish_answer(request, args)
-                if tool == "propose":
-                    plan, result = self.propose(args, emit)
+                if tool in ("propose", "refresh"):
+                    plan, result = self.propose(args, emit) if tool == "propose" else \
+                        self.tool_refresh(args, cancel, emit)
                     if plan:
                         self.pending = plan
                         self.turns.append(Turn(request, f"proposed: {plan.summary} "
@@ -379,6 +391,124 @@ class Agent:
                 out.append(f"… and {len(groups[verdict]) - 25} more (show {s.name})")
         return "\n".join(out)
 
+    # --- titles and site icons -------------------------------------------------------
+
+    def tool_refresh(self, args: dict, cancel: threading.Event, emit: Emit) -> tuple[Plan | None, str]:
+        """Page titles (read here, only up to </head>) and site icons (fetched again by Stash) at the same time.
+
+        When titles would change, the proposal is made right away: that saves a model call."""
+        try:
+            if args.get("set"):
+                ids = self.store.resolve(str(args["set"]))
+            else:
+                ids = [i for i in self._ints(args.get("ids")) if i in self.store.bookmarks]
+                if not ids:
+                    return None, "error: refresh needs a set or ids of bookmarks"
+        except KeyError as e:
+            return None, f"error: {e}".replace("\\'", "'")
+        ids = [i for i in ids if self.store.bookmarks[i].url.startswith(("http://", "https://"))]
+        if not ids:
+            return None, "error: these bookmarks have no web addresses"
+        if len(ids) > 2000:
+            return None, f"error: {len(ids)} bookmarks is too many at once; narrow the set first (at most 2000)"
+        titles, icons = args.get("titles", True) is not False, args.get("icons", True) is not False
+        if not titles and not icons:
+            return None, "error: titles and icons are both false, so there is nothing to refresh"
+        if titles and self.web is None:
+            return None, ("error: web access is turned off, so titles cannot be read "
+                          '([web] enabled = false); use "titles": false to refresh only the icons')
+        only_bad = bool(args.get("only_bad"))
+        what = " and ".join(w for w, on in (("titles", titles), ("icons", icons)) if on)
+        emit("tool", f"refresh {args.get('set') or 'ids'} ({len(ids)} bookmarks: {what})")
+
+        icon_out: dict = {}
+        worker = None
+        if icons:  # Stash fetches icons while this computer reads the pages
+            worker = threading.Thread(target=self._refresh_icons, args=(ids, icon_out, cancel), daemon=True)
+            worker.start()
+        lines, changed = [], []
+        if titles:
+            targets = [i for i in ids if not only_bad or self.bad_title(i)]
+            urls = {i: self.store.bookmarks[i].url for i in targets}
+            pages = self.web.check_many(list(dict.fromkeys(urls.values())), cancel=cancel, workers=16, head_only=True,
+                                        progress=lambda d, n: emit("status", f"reading titles {d}/{n}"))
+            unread, same = [], 0
+            for i in targets:
+                title = self.page_title(pages.get(urls[i]))
+                if title is None:
+                    unread.append(i)
+                elif title == self.store.bookmarks[i].title:
+                    same += 1
+                else:
+                    self.new_titles[i] = title
+                    changed.append(i)
+            skipped = f", {len(ids) - len(targets)} kept (only_bad)" if only_bad else ""
+            lines.append(f"titles: {len(changed)} would change, {same} already right, {len(unread)} could not be "
+                         f"read (error, login or block page){skipped}")
+            if unread:
+                s = self.store.new_set(unread, f"titles not read: {args.get('set') or 'ids'}", "refresh")
+                lines.append(f"{s.name} (titles not read, {len(unread)}): " +
+                             "; ".join(self.store.line(i, notes=False)[:90] for i in unread[:5]))
+        while worker and worker.is_alive():
+            if cancel.is_set():
+                raise Cancelled()
+            emit("status", "waiting for Stash to fetch the site icons")
+            worker.join(0.5)
+        if cancel.is_set():
+            raise Cancelled()
+        if icons:
+            if "error" in icon_out:
+                lines.append(f"icons: not refreshed ({icon_out['error']})")
+            else:
+                c = icon_out["counts"]
+                lines.append(f"icons: {sum(c.values())} sites fetched again: {c['new']} new icons, {c['same']} "
+                             f"unchanged, {c['kept']} kept (nothing better found), {c['missing']} sites have none")
+        result = "\n".join(lines)
+        if not changed:
+            return None, result + ("\nNo titles to change. Answer the user." if titles else "\nAnswer the user.")
+        s = self.store.new_set(changed, f"new titles: {args.get('set') or 'ids'}", "refresh")
+        emit("result", " | ".join(lines)[:300])
+        summary = str(args.get("summary") or "").strip()[:500] or f"Update the titles of {len(changed)} bookmarks"
+        plan, error = self.propose({"summary": summary, "ops": [{"op": "update_titles", "set": s.name}]}, emit)
+        return plan, error or result
+
+    def _refresh_icons(self, ids: list[int], out: dict, cancel: threading.Event) -> None:
+        by_host: dict[str, int] = {}
+        for i in ids:
+            by_host.setdefault(self.store.bookmarks[i].host, i)  # one bookmark per site is enough
+        reps = list(by_host.values())
+        counts = {"new": 0, "same": 0, "kept": 0, "missing": 0}
+        try:
+            for n in range(0, len(reps), ICON_SITES_PER_CALL):
+                if cancel.is_set():
+                    return
+                for k, v in self.api.refresh_icons(reps[n:n + ICON_SITES_PER_CALL])["counts"].items():
+                    counts[k] = counts.get(k, 0) + v
+        except StashError as e:
+            out["error"] = e.code if e.status != 404 else "this Stash is too old for refreshing icons"
+            return
+        out["counts"] = counts
+
+    def bad_title(self, i: int) -> bool:
+        """A title that is missing or only repeats the address."""
+        b = self.store.bookmarks[i]
+        t = b.title.strip().lower().rstrip("/")
+        url = b.url.lower().rstrip("/")
+        return not t or t in (url, url.split("://", 1)[-1], b.host, b.host.removeprefix("www.")) \
+            or t.startswith(("http://", "https://", "www."))
+
+    @staticmethod
+    def page_title(page) -> str | None:
+        """The page's own title, or None when the page did not answer with a real page of its own."""
+        if page is None or page.error or not page.status or page.status >= 400:
+            return None
+        if moved(page.url, page.final_url) and page.weak_move:  # sent to a login page or the front page
+            return None
+        title = (page.html_title or page.title).strip()
+        if not title or JUNK_TITLE.match(title):
+            return None
+        return title[:500]
+
     def tool_web_search(self, args: dict, cancel: threading.Event, emit: Emit) -> str:
         query = str(args.get("query") or "").strip()
         if not query:
@@ -428,6 +558,13 @@ class Agent:
                     tags = [tags] if isinstance(tags, str) else list(tags or [])
                     if tags:
                         ops.append({"op": "set_tags" if raw.get("replace") else "add_tags", "ids": bid, "tags": tags})
+                continue
+            if raw["op"] == "update_titles":
+                ids = self.store.resolve(str(raw.get("set", ""))) if raw.get("set") else self._ints(raw.get("ids"))
+                found = [i for i in ids if i in self.new_titles]
+                if not found:
+                    raise ValueError("update_titles: no new titles for these bookmarks; run refresh first")
+                ops += [{"op": "update", "id": i, "title": self.new_titles[i]} for i in found]
                 continue
             if raw["op"] == "update_urls":
                 ids = self.store.resolve(str(raw.get("set", ""))) if raw.get("set") else self._ints(raw.get("ids"))

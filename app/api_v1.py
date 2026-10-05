@@ -10,7 +10,9 @@ A real run is stored as a changeset with the earlier state of every touched book
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -22,6 +24,7 @@ from .main import (
     filter_sql, get_db, insert_bookmark, move_bookmarks, new_category, new_tab, next_position, norm_tag,
     norm_tags, own, remove_tags, set_tags, tags_for, url_host,
 )
+from .main import refresh_favicon
 from .security import limiter
 
 KEY_PREFIX = "stash_"
@@ -530,6 +533,42 @@ def changeset_list(c: Ctx, limit: int = 50) -> list[dict]:
                          " WHERE user_id=? ORDER BY id DESC LIMIT ?", (c.uid, limit)).fetchall()
     return [{"id": r["id"], "key": r["key_name"], "summary": r["summary"], "created_at": r["created_at"],
              "undone_at": r["undone_at"], "counts": json.loads(r["result"]).get("counts", {})} for r in rows]
+
+
+class FaviconRefresh(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=5000)
+
+
+FAVICON_HOSTS_PER_CALL = 60
+
+
+@v1.post("/favicons/refresh")
+async def favicons_refresh(body: FaviconRefresh, request: Request, c: KeyCtx = Depends(writer)):
+    """Fetch the site icons of these bookmarks again (one fetch per site, several sites at once).
+
+    Icons are a cache shared by all accounts, so only sites the user has bookmarked are fetched, and a
+    working icon is never replaced by a failure."""
+    key = f"favicons:{c.uid}"
+    if limiter.blocked(key, 60, 3600):
+        raise err(429, "too_many_attempts")
+    limiter.hit(key)
+    marks = ",".join("?" * len(body.ids))
+    hosts = sorted({r[0] for r in c.con.execute(
+        f"SELECT DISTINCT host FROM bookmarks WHERE user_id=? AND host<>'' AND id IN ({marks})",
+        (c.uid, *body.ids))})
+    if len(hosts) > FAVICON_HOSTS_PER_CALL:
+        raise err(422, "too_many_sites")
+    sem = asyncio.Semaphore(12)
+
+    async def one(host: str) -> tuple[str, str]:
+        async with sem:
+            return host, await refresh_favicon(request.app.state.http, host)
+
+    results = dict(await asyncio.gather(*(one(h) for h in hosts)))
+    if "new" in results.values():
+        db.set_config(c.con, "favicon_rev", str(int(time.time())))  # browsers load the changed icons again
+    counts = {k: sum(v == k for v in results.values()) for k in ("new", "same", "kept", "missing")}
+    return {"sites": results, "counts": counts}
 
 
 @v1.post("/changes")

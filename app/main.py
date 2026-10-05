@@ -138,7 +138,8 @@ def client_ip(request: Request) -> str:
 
 def user_json(c: Ctx) -> dict:
     return {"id": c.uid, "username": c.user["username"], "is_admin": bool(c.user["is_admin"]),
-            "totp_on": bool(c.user["totp_on"]), "settings": c.settings}
+            "totp_on": bool(c.user["totp_on"]), "settings": c.settings,
+            "favicon_rev": db.get_config(c.con, "favicon_rev", "")}
 
 
 def start_session(con, response: Response, user_id: int) -> None:
@@ -1207,6 +1208,29 @@ def _favicon_known(host: str) -> bool:
         return con.execute("SELECT 1 FROM bookmarks WHERE host=? LIMIT 1", (host,)).fetchone() is not None
     finally:
         con.close()
+
+
+async def refresh_favicon(client, host: str) -> str:
+    """Fetch a site's icon again, ignoring the cache. A working icon is only replaced by a working new one.
+
+    Returns new (a different icon was found), same, kept (none found, the old one stays) or missing."""
+    try:
+        data = await asyncio.wait_for(net.favicon(client, host), 20)
+    except Exception:
+        data = None
+    path = FAVICONS / host
+    old = path.read_bytes() if path.exists() else b""
+    if not data:
+        if net.sniff_image(old):
+            return "kept"
+        path.write_bytes(b"")  # remember the miss for another week
+        return "missing"
+    if data == old:
+        return "same"
+    tmp = FAVICONS / f".{host}.tmp"
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    return "new"
 
 
 @app.get("/favicon/{host}", include_in_schema=False)

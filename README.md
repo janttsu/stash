@@ -105,6 +105,7 @@ allowed to make changes. `/api/v1` never accepts the session cookie, so it needs
 | `GET /api/v1/tags`, `GET /api/v1/structure` | tags with counts, tabs and categories |
 | `POST /api/v1/changes` | `{"ops": [...], "summary": "...", "dry_run": true}`: changes in one transaction |
 | `GET /api/v1/changes`, `POST /api/v1/changes/{id}/undo[?force=true]` | change history and undo |
+| `POST /api/v1/favicons/refresh` | `{"ids": [...]}`: fetch the site icons of these bookmarks again, ignoring the cache (a key that can change; at most 60 sites per call) |
 | `POST /api/v1/history/{device}` | `{"items": [...], "reset": true, "done": true}`: a device's browsing history (replaces its earlier one) |
 | `GET /api/v1/history?q=&host=&min_visits=&period=&bookmarked=` | visited addresses, most visited first, with the bookmarks they match |
 | `GET /api/v1/history/usage`, `GET /api/v1/history/sources`, `DELETE /api/v1/history/{device}` | visit counts of bookmarks, devices, deleting |
@@ -119,6 +120,10 @@ exactly what would happen. A real run stores a changeset (the latest 200) with t
 touched bookmark and category; undoing it restores them, brings deleted bookmarks back and removes added ones.
 If a later change touched the same bookmarks, undo needs `force=true`. Changes can also be seen and undone in
 Settings → Changes made with API keys.
+
+Site icons are a cache shared by all accounts. A refresh fetches only sites the caller has bookmarked, never
+replaces a working icon with a failure, and changes the icon version the web UI loads icons with, so browsers
+show a new icon at once instead of keeping their week-long cached copy.
 
 Browsing history is matched to bookmarks loosely (http/https, `www.` and a trailing slash do not matter). Each
 device sends visit counts per address (last 30, 90 and 365 days, and all), and a new sync replaces that
