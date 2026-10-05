@@ -78,7 +78,11 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     position    INTEGER NOT NULL DEFAULT 0,
     search      TEXT NOT NULL DEFAULT '',
     created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL
+    updated_at  INTEGER NOT NULL,
+    dead        INTEGER NOT NULL DEFAULT 0,
+    dead_streak INTEGER NOT NULL DEFAULT 0,
+    checked_at  INTEGER,
+    meta_at     INTEGER
 );
 CREATE INDEX IF NOT EXISTS bookmarks_user ON bookmarks(user_id, created_at);
 CREATE INDEX IF NOT EXISTS bookmarks_cat ON bookmarks(category_id, position);
@@ -160,6 +164,15 @@ def init() -> None:
     try:
         con.execute("PRAGMA journal_mode=WAL")
         con.executescript(SCHEMA)
+        # columns added after the first release: add them to databases that predate them
+        have = {r[1] for r in con.execute("PRAGMA table_info(bookmarks)")}
+        for name, decl in (("dead", "INTEGER NOT NULL DEFAULT 0"), ("dead_streak", "INTEGER NOT NULL DEFAULT 0"),
+                           ("checked_at", "INTEGER"), ("meta_at", "INTEGER")):
+            if name not in have:
+                con.execute(f"ALTER TABLE bookmarks ADD COLUMN {name} {decl}")
+        # these indexes reference the columns added just above, so they come after the migration
+        con.execute("CREATE INDEX IF NOT EXISTS bookmarks_checked ON bookmarks(checked_at)")
+        con.execute("CREATE INDEX IF NOT EXISTS bookmarks_meta ON bookmarks(meta_at)")
     finally:
         con.close()
     os.chmod(DB_PATH, 0o600)

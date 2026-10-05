@@ -46,10 +46,13 @@ COLORS = {"", "red", "orange", "yellow", "green", "teal", "blue", "indigo", "pur
 SCHEMES = {"http", "https", "ftp", "mailto", "tel"}
 DEFAULT_SETTINGS = {
     "theme": "auto", "lang": "", "tab_size": "m", "new_tab": True, "tooltips": True,
-    "favicons": True, "auto_tag_catalog": False, "tag_order": "count",
+    "favicons": True, "auto_tag_catalog": False, "tag_order": "count", "auto_maintain": True,
 }
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; "
        "base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+
+
+MAINTENANCE_ON = os.environ.get("STASH_MAINTENANCE", "on").strip().lower() not in ("off", "0", "false", "no")
 
 
 @asynccontextmanager
@@ -60,8 +63,20 @@ async def lifespan(app: FastAPI):
     con.execute("DELETE FROM sessions WHERE expires_at < ?", (db.now(),))
     con.close()
     app.state.http = net.make_client()
-    yield
-    await app.state.http.aclose()
+    task = None
+    if MAINTENANCE_ON:
+        from . import maintenance
+        task = asyncio.create_task(maintenance.run(app.state.http))
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        await app.state.http.aclose()
 
 
 app = FastAPI(title="Stash", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -485,6 +500,7 @@ class SettingsPatch(BaseModel):
     favicons: Optional[bool] = None
     auto_tag_catalog: Optional[bool] = None
     tag_order: Optional[Literal["count", "alpha"]] = None
+    auto_maintain: Optional[bool] = None
 
 
 @app.patch("/api/settings")

@@ -52,7 +52,9 @@ function behaviour() {
     h('h2', null, t('Bookmarks')),
     checkField(t('Open links in a new browser tab'), 'new_tab'),
     checkField(t('Auto-tag when moving to the Catalog'), 'auto_tag_catalog',
-      t('The tab and category names are added as tags, so the bookmark stays easy to find.')));
+      t('The tab and category names are added as tags, so the bookmark stays easy to find.')),
+    checkField(t('Keep bookmarks tidy automatically'), 'auto_maintain',
+      t('Stash checks now and then by itself: missing titles get the real page title, site icons are fetched again, pages that are gone get the dead-link tag, and extra copies of the same address get the duplicate tag. The tags clear on their own when no longer needed.')));
 }
 
 function addButtons() {
