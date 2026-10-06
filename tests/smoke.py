@@ -53,6 +53,19 @@ with TestClient(app):  # runs startup (schema creation)
     ok(b.get("/api/admin"), 403)
     ok(anon.post("/api/login", json={"username": "alice", "password": "wrong"}), 401)
 
+    # --- "remember this browser": 30 days, otherwise only until the browser closes ---
+    def session_of(r):
+        token = r.cookies.get("stash_session")
+        return db.connect().execute("SELECT remember, expires_at - created_at AS ttl FROM sessions WHERE token_hash=?",
+                                    (security.token_hash(token),)).fetchone()
+
+    short = client().post("/api/login", json={"username": "bob", "password": "bob password"})
+    assert "max-age" not in short.headers["set-cookie"].lower(), "the cookie ends with the browser"
+    assert tuple(session_of(short)) == (0, 12 * 3600)
+    long = client().post("/api/login", json={"username": "bob", "password": "bob password", "remember": True})
+    assert "max-age=2592000" in long.headers["set-cookie"].lower()
+    assert tuple(session_of(long)) == (1, 30 * 86400)
+
     # --- dashboard structure ---
     dash = ok(a.get("/api/dashboard"))
     assert [t["name"] for t in dash["tabs"]] == ["Koti"] and dash["categories"][0]["name"] == "Suosikit"

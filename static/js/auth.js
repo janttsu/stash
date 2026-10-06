@@ -24,6 +24,8 @@ export async function renderAuth(container, onDone) {
     const totp = h('input', {
       type: 'text', class: 'input', inputMode: 'numeric', autocomplete: 'one-time-code', maxLength: 10, placeholder: '123456',
     });
+    const remember = h('input', { type: 'checkbox' });
+    const rememberField = h('label', { class: 'check' }, remember, h('span', null, t('Remember this browser for 30 days')));
     const totpField = h('label', { class: 'field', hidden: true }, h('span', null, t('Code from your authenticator app')), totp);
     const error = h('p', { class: 'form-error', hidden: true });
     const submit = h('button', { type: 'submit', class: 'btn primary block' },
@@ -38,7 +40,9 @@ export async function renderAuth(container, onDone) {
           if (password.value !== again.value) throw new Error(t('The passwords do not match.'));
           await api('POST', '/api/register', { username: username.value, password: password.value, invite, lang: getLang() });
         } else {
-          await api('POST', '/api/login', { username: username.value, password: password.value, totp: totp.value });
+          await api('POST', '/api/login', {
+            username: username.value, password: password.value, totp: totp.value, remember: remember.checked,
+          });
         }
         onDone();
       } catch (err) {
@@ -63,6 +67,7 @@ export async function renderAuth(container, onDone) {
         h('label', { class: 'field' }, h('span', null, mode === 'register' ? t('Password (at least 8 characters)') : t('Password')), password),
         mode === 'register' && h('label', { class: 'field' }, h('span', null, t('Password again')), again),
         mode === 'login' && totpField,
+        mode === 'login' && rememberField,
         error,
         submit),
       canRegister && !config.first_user && h('p', { class: 'center' }, h('button', {

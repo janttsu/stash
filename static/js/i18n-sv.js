@@ -71,6 +71,7 @@ export const SV = {
   "Username": "Användarnamn",
   "Password": "Lösenord",
   "Password (at least 8 characters)": "Lösenord (minst 8 tecken)",
+  "Remember this browser for 30 days": "Kom ihåg den här webbläsaren i 30 dagar",
   "Password again": "Lösenord igen",
   "Code from your authenticator app": "Kod från din autentiseringsapp",
   "Create account": "Skapa konto",
