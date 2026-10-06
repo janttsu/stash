@@ -1,14 +1,8 @@
 import time
 
-from conftest import FakeLLM, ids_by_title
+from conftest import ids_by_title
 
-from stashai.agent import Agent
-from stashai.render import plan_text
-from stashai.store import Store
-
-
-def step(tool, **args):
-    return {"thought": tool, "tool": tool, "args": args}
+from stashai.session import Session
 
 
 def send_history(api, items):
@@ -19,40 +13,34 @@ def send_history(api, items):
     assert r.status_code == 200, r.text
 
 
-def make(api, script):
-    agent = Agent(api=api, llm=FakeLLM(script), store=Store())
-    agent.refresh()
-    return agent
+def make(api):
+    s = Session(api)
+    s.ensure(force=True)
+    return s
 
 
 def test_without_history_nothing_changes(api):
-    agent = make(api, [step("history", text="x"), step("answer", message="ok")])
-    assert "visits" not in agent.store.line(next(iter(agent.store.bookmarks)))
-    assert "BROWSING HISTORY" not in agent.store.overview()
-    agent.ask("what do I use most?")
-    assert "no browsing history in Stash yet" in agent.llm.calls[1][-1]["content"]
+    s = make(api)
+    assert "visits" not in s.store.line(next(iter(s.store.bookmarks)))
+    assert "BROWSING HISTORY" not in s.store.overview()
+    assert "No browsing history in Stash yet" in s.browsing_history(text="x")
+    assert "Browsing history: none sent yet" in s.overview()
 
 
 def test_usage_on_lines_search_and_history_tool(api):
     send_history(api, [("https://acme.example/docs", "ACME docs", 40), ("http://recipes.example/buns/", "Pulla", 3),
                        ("https://often.example/", "Often used, no bookmark", 25)])
-    agent = make(api, [
-        step("history", bookmarked="no", min_visits=5),
-        step("search", used_min=2, sort="use"),
-        step("answer", message="ok"),
-    ])
-    t = ids_by_title(agent.store)
-    assert "visits 30d 40, 90d 40, all 40" in agent.store.line(t["ACME documentation"])
-    assert "visits: none" in agent.store.line(t["ACME blog"])
-    assert "BROWSING HISTORY from macbook" in agent.store.overview() and "2 bookmarks visited" in agent.store.overview()
-    assert agent.store.search(unused_days=30) and t["ACME documentation"] not in agent.store.search(unused_days=30)
-    agent.ask("what do I use often but have not bookmarked?")
-    hist = agent.llm.calls[1][-1]["content"]
+    s = make(api)
+    t = ids_by_title(s.store)
+    assert "visits 30d 40, 90d 40, all 40" in s.store.line(t["ACME documentation"])
+    assert "visits: none" in s.store.line(t["ACME blog"])
+    assert "BROWSING HISTORY from macbook" in s.store.overview() and "2 bookmarks visited" in s.store.overview()
+    assert s.store.search(unused_days=30) and t["ACME documentation"] not in s.store.search(unused_days=30)
+    hist = s.browsing_history(bookmarked="no", min_visits=5)
     assert "https://often.example/ | Often used, no bookmark | 30d 25" in hist and "NOT bookmarked" in hist
     assert "acme.example" not in hist
-    assert "Stash holds 3 different visited addresses (macbook: 3 rows, visits" in hist
-    assert "With the filters min_visits=5, period=90d, bookmarked=no: 1 match" in hist
-    found = agent.llm.calls[2][-1]["content"]
+    assert "Stash holds 3 visited addresses" in hist and "min_visits=5, period=90d, bookmarked=no: 1 match" in hist
+    found = s.search(used_min=2, sort="use")
     assert found.index("ACME documentation") < found.index("Bun recipe"), "most used first"
 
 
@@ -63,16 +51,15 @@ def test_sort_by_use_orders_bookmarks_and_categories(api):
         {"op": "create", "url": "https://c.example/", "title": "Tools", "tab": "Work", "category": "Utilities"},
     ], "setup", dry_run=False)
     send_history(api, [("https://b.example/", "", 50), ("https://a.example/", "", 1), ("https://c.example/", "", 200)])
-    agent = make(api, [step("propose", summary="Most used first", ops=[{"op": "sort_by_use", "tab": "work"}])])
-    out = agent.ask("order the work tab by use")
-    p = out.plan.preview
-    pos = {e["title"]: e["position"] for e in p["diff"]}
+    s = make(api)
+    text = s.preview_changes([{"op": "sort_by_use", "tab": "work"}], "Most used first")
+    preview = s.previews["P1"].result
+    pos = {e["title"]: e["position"] for e in preview["diff"]}
     assert pos == {"Daily": [3, 1], "ACME blog": [1, 3]}  # Rarely (1 visit) stays second
-    text = "\n".join(plan_text(out.plan.summary, p))
-    assert "place 3 → 1" in text
-    if p["categories"]:  # both categories in one column: Utilities (200 visits) goes first
+    assert "place 3 → 1" in text and 'apply_changes("P1")' in text
+    if preview["categories"]:  # both categories in one column: Utilities (200 visits) goes first
         assert "ORDER   Work / Utilities" in text
-    agent.apply()
-    agent.undo()
-    assert {b.title: b.position for b in agent.store.bookmarks.values() if b.category == "Clients"} == \
+    assert "Applied as change #" in s.apply_changes("P1")
+    assert "Undid #" in s.undo()
+    assert {b.title: b.position for b in s.store.bookmarks.values() if b.category == "Clients"} == \
         {"ACME blog": 0, "Rarely": 1, "Daily": 2}

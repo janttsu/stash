@@ -1,7 +1,6 @@
-"""A real Stash app on a throwaway database, and a scripted stand-in for the model."""
+"""A real Stash app on a throwaway database."""
 from __future__ import annotations
 
-import json
 import os
 import sys
 import tempfile
@@ -28,46 +27,6 @@ BOOKMARKS = [
     {"url": "https://x.example/", "title": "X", "tags": []},
     {"url": "https://example.org/max", "title": "Maximum likelihood", "tags": ["ml"]},
 ]
-
-
-class FakeLLM:
-    """Answers from a script: each item is a dict (sent as JSON), a string, or a function of the messages."""
-
-    def __init__(self, script=None, judge=None):
-        self.script = list(script or [])
-        self.judge = judge            # function(question, ids) -> (match, unsure)
-        self.calls: list[list[dict]] = []
-        self.model = "fake"
-        self.num_ctx = 0
-        self.last_stats: dict = {}
-
-    def chat(self, messages, *, schema=None, temperature=None, max_tokens=0, cancel=None, on_progress=None):
-        self.calls.append([dict(m) for m in messages])  # a copy: the agent keeps appending to its list
-        if cancel is not None and cancel.is_set():
-            from stashai.llm import Cancelled
-            raise Cancelled()
-        if messages[0]["content"] == "Reply with {}":  # the TUI's warm-up request
-            return "{}"
-        if messages[0]["content"].startswith("You check bookmarks"):
-            text = messages[1]["content"]
-            question = text.split("\n", 1)[0].removeprefix("QUESTION: ")
-            ids = [int(line[1:].split()[0]) for line in text.splitlines() if line.startswith("#")]
-            match, unsure = self.judge(question, ids) if self.judge else ([], [])
-            return json.dumps({"match": match, "unsure": unsure})
-        item = self.script.pop(0)
-        if callable(item):
-            item = item(messages)
-        return item if isinstance(item, str) else json.dumps(item)
-
-    def context_length(self):
-        return 32768
-
-    def model_details(self):
-        return [{"name": n, "size_gb": g, "params": "", "quant": "", "loaded": False}
-                for n, g in (("fake", 1.0), ("qwen3.6:35b-a3b", 23.9), ("small:9b", 6.6))]
-
-    def health(self):
-        return True, "fake"
 
 
 @pytest.fixture(scope="session")

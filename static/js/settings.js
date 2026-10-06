@@ -121,12 +121,12 @@ function apiKeys() {
           }, t('Revoke'))))))))
         : h('p', { class: 'muted' }, t('No API keys yet.')),
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => createKey(draw) }, t('Create API key'))),
-      h('h3', null, t('stashai: bookmarks in plain language, from the terminal')),
-      h('p', null, t('stashai is a terminal program for Linux. You write what you want (“move everything about company X to tag Y”, “list everything about Z”), a language model running on your own computer works out how, shows exactly what would change and changes your bookmarks only when you accept. Every change can be undone below.')),
+      h('h3', null, t('stashai: your bookmarks in AI assistants (MCP)')),
+      h('p', null, t('stashai connects Stash to Qwen Code, Claude Code, Gemini CLI and other MCP clients. You write what you want (“move everything about company X to tag Y”, “list everything about Z”), the assistant finds the bookmarks, shows exactly what would change and changes them only when you agree. Every change can be undone below.')),
       install ? h('div', { class: 'row' },
         h('input', { type: 'text', class: 'input mono', readOnly: true, value: install, onfocus: (e) => e.target.select() }),
         h('button', { type: 'button', class: 'btn', onclick: () => copyText(install) }, t('Copy'))) : null,
-      h('p', { class: 'muted' }, t('Then run “stashai login {url}” and paste a key that can read and change. It needs Ollama and the model qwen3.6:35b-a3b on the same computer.', { url: location.origin })),
+      h('p', { class: 'muted' }, t('Then run “stashai login {url}”, paste a key that can read and change, and add “stashai mcp” to your MCP client: “stashai doctor” prints the settings.', { url: location.origin })),
       h('p', { class: 'muted' }, t('The same command also replaces an older version. Versions 0.1.1 and newer update themselves with “stashai update”.')));
   };
   draw();

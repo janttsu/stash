@@ -1,141 +1,139 @@
 # stashai
 
-Manage your Stash bookmarks in plain language from a Linux terminal. You write what you want, a language
-model running on your own computer (Ollama, `qwen3.6:35b-a3b` by default) works out how, shows exactly what
-would change, and changes your bookmarks only when you accept. The model runs on your own machine, so your
-bookmarks, browsing history and requests never reach a cloud service.
+Your Stash bookmarks as an **MCP server**, so you can manage them in plain language from Qwen Code, Claude
+Code, Gemini CLI or any other MCP client, plus a few terminal helpers. You write what you want, the client's
+model finds the bookmarks with stashai's tools, shows you the exact change as a preview, and changes nothing
+until you agree. Every change can be undone.
 
 ```
 > list everything about company X
 > move everything about company X to the tag y
 > which bookmarks have no tags? suggest tags for them
-> delete those
 > check whether the links tagged linux still work and fix the moved ones
-> fix the titles and icons of the bookmarks on the Work tab
-> what is behind bookmark 1234? tag it properly
+> fix the titles of the bookmarks on the Work tab
 > bring my most used bookmarks to the Dashboard, most used first
 > which pages do I visit often but have not bookmarked?
-> which Dashboard bookmarks have I not used for a year?
 ```
 
-Requests can be written in any language the model understands; it answers in the same language.
+Before version 0.2, stashai had its own terminal UI and drove a local Ollama model itself. That agent is gone:
+the model now lives in your MCP client, and stashai provides the tools and the safety around them.
 
 ## Installing
 
-You need Python 3.11+, pipx and Ollama with the model:
+You need Python 3.11+ and pipx.
 
 ```sh
-ollama pull qwen3.6:35b-a3b
-pipx install --force https://stash.example.com/dl/stashai-0.1.11-py3-none-any.whl   # exact address: Stash → Settings → API keys
-stashai login https://stash.example.com      # paste a key that can change
-stashai doctor                                # checks Stash, the model and the context size
-stashai                                       # the terminal UI: first asks which local model to use
-stashai -m qwen3.6:35b-a3b                    # the terminal UI with this model, without asking
+pipx install --force https://stash.example.com/dl/stashai-0.2.0-py3-none-any.whl   # exact address: Stash → Settings → API keys
+stashai login https://stash.example.com      # paste an API key that can change
+stashai doctor                                # checks Stash and prints the MCP client settings below
 stashai update                                # installs the newest version (served by your Stash)
 ```
 
-From version 0.1.1 on, stashai updates itself with `stashai update`; it also tells you at start and in
-`stashai doctor` when a newer version is available.
+Get an API key from Stash: Settings → API keys → Create API key, with "Allow changes". It is saved in
+`~/.config/stashai/config.toml`, readable only by you (or give it in the environment variables `STASHAI_URL`
+and `STASHAI_KEY`).
 
-The model is taken from the same Ollama the `ollama` command uses: `[llm] url` in `config.toml`, otherwise
-`OLLAMA_HOST`, otherwise `127.0.0.1:11434`.
+## Connecting an MCP client
 
-Get an API key from Stash: Settings → API keys → Create API key. It is saved in
-`~/.config/stashai/config.toml`, readable only by you (or give it in the environment variable `STASHAI_KEY`).
+The client starts `stashai mcp` itself and talks to it over stdio. `stashai doctor` prints these lines with the
+full path to your `stashai`.
 
-## Using it
+**Qwen Code**: add to `~/.qwen/settings.json` (or `.qwen/settings.json` in a project):
 
-- At start, stashai lists every model your Ollama has (size, parameters, which one is loaded) and asks which
-  one to use; the one you chose last time is highlighted. `-m NAME` (or `STASHAI_MODEL`) skips the question,
-  and **F2** (or `/model`) changes the model at any point of the session.
-- The status line shows how full the model's context was at its latest step, e.g. `context 9.4k/32k (29 %)`,
-  yellow from 60 % and red from 85 %. Older tool results are shortened automatically when it fills up, and
-  every request starts with a fresh context (earlier requests are carried over as a short summary).
-- On the left: the conversation and the model's steps. On the right: results and proposals.
-- A proposal shows every change (tags +/-, moves, new order, deletions). **y** or an empty Enter applies it,
-  **n** rejects it, or write a correction instead ("don't delete the ones tagged x").
-- **Esc** stops the model, **F2** changes the model, **PgUp/PgDn** scroll the right pane, **F1** help.
-- **q** (or **Ctrl+Q**) quits.
-- Commands: `/undo [ID] [force]`, `/history`, `/sets`, `/show S3`, `/refresh`, `/new`, `/rules`, `/model NAME`.
+```json
+{
+  "mcpServers": {
+    "stash": { "command": "stashai", "args": ["mcp"] }
+  }
+}
+```
 
-Without the UI: `stashai ask "request" [-m MODEL]` (the model from the config unless given; asks before
-changing anything; `--yes` applies right away),
-`stashai history`, `stashai undo [ID]`.
+**Gemini CLI**: the same block in `~/.gemini/settings.json`.
 
-### Fixing titles from another computer
-
-`stashai titles` reads each page **from the computer it runs on** and gives bookmarks their pages' real
-titles. No language model is involved, so it is light and fits a scheduled job. Because the page is fetched
-locally, a title your Stash server cannot get from where it runs (for example a site that only answers in
-certain countries) can be fixed simply by running the command on a computer there.
+**Claude Code**:
 
 ```sh
+claude mcp add stash -- stashai mcp
+```
+
+Then just ask, for example "list my bookmarks about Python that have no tags". The server sends the client
+instructions on how to work with the tools, so no separate prompt file is needed. Leave `apply_changes` and
+`undo` behind the client's confirmation prompt (the default in Qwen Code and Claude Code): then nothing
+changes without your explicit yes, even if the model misunderstands.
+
+## The tools
+
+| Tool | What it does |
+| --- | --- |
+| `overview` | tags with counts, tabs and categories, size of the collection, the sets made so far |
+| `search` | finds bookmarks by words, regex, site, tags, tab, category, dates or use, and keeps them as a set (S1, S2, …) |
+| `show`, `combine` | list a set; union, intersection or difference of two sets |
+| `browsing_history` | visited addresses from your synced Firefox history, also those not bookmarked |
+| `read_page` | reads one page as text from your computer |
+| `check_links` | checks every link of a set: alive, moved, dead, unclear |
+| `refresh_titles` | reads the pages' real titles from your computer and previews giving them to the bookmarks |
+| `refresh_icons` | has Stash fetch the site icons again (a server cache, done at once) |
+| `preview_changes` | runs changes as a dry run in Stash and returns the exact diff with a preview id (P1, P2, …) |
+| `apply_changes` | applies a preview you agreed to |
+| `recent_changes`, `undo` | the latest changes and taking one back |
+
+Changes are operations on sets: add, remove or replace tags, rename a tag everywhere, delete, move to a
+Dashboard category or the Catalog, update one bookmark, tag each bookmark differently, create, reorder,
+sort by use, give moved links their new address, and give bookmarks their refreshed titles.
+
+## How it stays safe
+
+- **Sets by name, not lists of ids.** Every search makes a set and changes refer to it by name. stashai
+  expands names into ids itself, so the model cannot lose or invent bookmarks, and long lists never have to
+  pass through the model.
+- **Preview, then apply.** `preview_changes` is an exact dry run in Stash. `apply_changes` only takes a preview
+  id, and it runs the dry run once more first: if the bookmarks changed after the preview (for example in the
+  web UI), nothing is applied and a new preview is needed.
+- **Undoable.** Every applied preview is one changeset in Stash with the earlier state of everything it
+  touched. `undo` (or Stash → Settings → Changes made with API keys) brings it back.
+- **Untrusted pages.** The client is told that page text, titles and history titles are data, never
+  instructions. Pages are fetched from your computer, never from its own addresses, and not from the local
+  network unless `[web] allow_private = true`.
+
+## Your own rules
+
+`~/.config/stashai/rules.md` holds your standing rules in plain language, for example "recipes always have the
+tag food and no other tags". `stashai mcp` hands them to the client's model with its instructions, so they
+apply in every change. The file is read when the client starts the server.
+
+## Privacy
+
+stashai itself only talks to your Stash and to the pages it reads. What the model sees depends on your MCP
+client: a cloud model receives the titles, addresses and tags in the tool results. To keep everything on your
+own machines, point the client at a local model (Qwen Code and Gemini CLI accept an OpenAI-compatible
+endpoint such as Ollama's).
+
+## Terminal helpers
+
+These need no model:
+
+```sh
+stashai history                # the latest changes made with API keys
+stashai undo [ID] [--force]    # undo the latest change (or change ID)
 stashai titles                 # fill in empty or address-only titles, ask before applying
 stashai titles --all           # re-read every bookmark and fix any whose page now has a different title
 stashai titles --host x.com    # only that site (subdomains included);  --tag news  only that tag
 stashai titles --all --yes     # apply without asking (for cron);  --dry-run shows the changes only
 ```
 
-Titles the page cannot give (errors, login or placeholder pages) are left as they are, and every change can be
-undone with `stashai undo`. `--icons` additionally asks the Stash server to fetch the site icons again.
+`stashai titles` reads each page from the computer it runs on. A title your Stash server cannot get from where
+it runs (for example a site that only answers in certain countries) is fixed by running the command on a
+computer there. Error, login and placeholder pages are skipped, and `--icons` also has the server fetch the
+site icons again.
 
-### Your own rules
-
-`~/.config/stashai/rules.md` holds your standing rules in plain language, for example "recipes always have the
-tag food and no other tags". The model follows them in every proposal. The file is read at every request.
-
-## How it works
-
-The principles come from sorto, a local-LLM file sorter by the same author:
-
-- **The model only proposes.** It uses read-only tools (search, list, check) and finally either answers or
-  proposes changes. The program checks the proposal and Stash runs it as a dry run, so the preview is exactly
-  what would happen. Nothing changes before you accept.
-- **Sets by name, not lists of ids.** Every search makes a set (S1, S2, …) and the model refers to it by name
-  ("delete S4"). The program expands names into ids, so the model cannot lose or invent bookmarks. Sets of up to
-  60 bookmarks are listed whole, so the model has their ids at hand. "Those" means the set shown last.
-- **Everything at once when needed.** All bookmarks are loaded onto your computer at once, so searches are
-  instant. When words are not enough (topic, meaning, language), `judge` lets the model read a set through in
-  batches of 60; `ALL` goes through the whole collection (slow: about 80 model calls for 4,700 bookmarks).
-- **The web.** The model can read a page as text (`fetch`: status, redirects, title, description, headings,
-  text), check all links of a set at once (`check`: alive / moved / dead / unclear) and search the web
-  (`web_search`: DuckDuckGo or your own SearXNG). Moved links can be given their new address (`update_urls`).
-  `refresh` fixes titles and site icons in one go: it reads only the start of each page (up to `</head>`),
-  16 pages at a time, while Stash fetches the icons of the same sites again. Each bookmark gets its page's own
-  `<title>`; error, block and login pages are skipped, and `only_bad` limits it to titles that are empty or
-  just the address. When titles would change, the proposal comes straight from the tool without another model
-  call. Icons are a cache on the server, not bookmark data, so they are refreshed right away (a working icon is
-  only replaced by a working new one); titles change only when you accept.
-  A link that redirects to a front page or a login is "unclear", not "moved", and "dead" means only 404/410, no
-  such host or a refused connection. Requests go from your own computer (pages behind your VPN work), but never
-  to this computer's own addresses, and not to the local network unless `allow_private` is set. Page text is
-  data, not instructions: the model is told never to follow commands written in a page, and even if it tried,
-  the result would only be a proposal you see before accepting. Web search queries go to DuckDuckGo;
-  `[web] search = "off"` or the address of your own SearXNG changes that.
-- **Browsing history.** Once your Firefox history has been sent to Stash (`stash-history-sync.py`, see Stash →
-  Settings → Browsing history), every bookmark line shows the model its visit counts (30 / 90 days / all) and
-  the last visit. Searches can filter by use (`used_min`, `unused_days`, `sort: "use"`), `history` lists visited
-  addresses (also those not bookmarked), and `sort_by_use` orders a tab's bookmarks and categories most used
-  first. The order is computed by the program from the visit counts, so it is always consistent; the model only
-  decides what goes to the Dashboard and where.
-- **Undoable.** Every applied change is stored in Stash as a changeset with the earlier state of what it
-  touched. `/undo` (or Stash → Settings → Changes made with API keys) restores tags, places, order and details,
-  brings deleted bookmarks back and removes added ones.
-- **Only a local model.** The model's address must be this computer (loopback); proxy settings are ignored.
-  Your bookmarks never go to cloud models.
-- **A log.** Each session writes `~/.local/state/stashai/logs/session-*.log` (requests, model replies, tool
-  results, proposals and applied changes).
-
-Settings (`[llm]` in `config.toml`): `url`, `model`, `num_ctx` (0 = the server's `OLLAMA_CONTEXT_LENGTH`; with
-less than 16,384 tokens stashai asks for 32,768), `think` (Qwen's hidden reasoning: sometimes better plans,
-much slower), `judge_batch`, `max_steps`, `keep_alive`. `[web]`: `enabled` (true), `search` (`"duckduckgo"`,
-a SearXNG address or `"off"`), `allow_private` (false).
+Settings in `config.toml`: `[stash] url, key`; `[web] enabled` (true: pages may be read from this computer),
+`allow_private` (false). An `[llm]` section from older versions is ignored.
 
 ## Development
 
 ```sh
 cd client
 python -m venv .venv && .venv/bin/pip install -e '.[dev]' fastapi pydantic
-.venv/bin/python -m pytest -q             # runs the agent against the real Stash app (throwaway database)
+.venv/bin/python -m pytest -q             # runs the tools against the real Stash app (throwaway database)
 .venv/bin/pip wheel --no-deps -w dist .   # the package Stash serves at /dl/
 ```
