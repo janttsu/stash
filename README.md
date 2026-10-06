@@ -23,6 +23,9 @@ without handing it to anyone.
    - **Catalog**: a tagged store with fast search.
    - Import and export as a browser bookmarks file, sharing a tab by link, finding duplicates and dead links,
      a bookmarklet, a browser extension, two-factor authentication and invitation-based registration.
+   - **Always current.** An open page redraws itself when the bookmarks change anywhere: in another tab or
+     device, through an API key or MCP client, or in the background upkeep. It waits while you are typing, dragging
+     or have a dialog open.
    - **Keeps itself tidy.** In the background Stash slowly re-checks bookmarks on its own, so you rarely have to
      run the duplicate or dead-link tools by hand (see *Background upkeep* below). Each account can switch this
      off in Settings.
@@ -65,10 +68,12 @@ without handing it to anyone.
 
 ```sh
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-STASH_ORIGIN=https://stash.example.com .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8003
+STASH_ORIGIN=https://stash.example.com .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8003 --timeout-graceful-shutdown 5
 ```
 
-Put a reverse proxy with HTTPS in front of it (for example Caddy or nginx). As a systemd user service:
+Put a reverse proxy with HTTPS in front of it (for example Caddy or nginx). Open pages keep a server-sent events
+stream (`/api/events`) open, so give uvicorn `--timeout-graceful-shutdown`: otherwise a restart waits for those
+streams to end (they close and reconnect every five minutes). As a systemd user service:
 
 ```sh
 systemctl --user status stash          # the service

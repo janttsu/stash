@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS users (
     totp_on     INTEGER NOT NULL DEFAULT 0,
     totp_last   INTEGER NOT NULL DEFAULT 0,
     settings    TEXT NOT NULL DEFAULT '{}',
-    created_at  INTEGER NOT NULL
+    created_at  INTEGER NOT NULL,
+    rev         INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -149,6 +150,27 @@ CREATE TABLE IF NOT EXISTS history_sources (
 """
 
 
+# users.rev goes up whenever something the user sees changes, whoever changed it (web UI, API key, background
+# upkeep, server commands). Open pages watch it through /api/events and redraw themselves.
+_BUMP = "UPDATE users SET rev=rev+1 WHERE id={who};"
+REV_TRIGGERS = "".join(
+    f"CREATE TRIGGER IF NOT EXISTS rev_{name} AFTER {event} ON {table} BEGIN {_BUMP.format(who=who)} END;\n"
+    for name, event, table, who in (
+        ("bm_ins", "INSERT", "bookmarks", "NEW.user_id"),
+        ("bm_del", "DELETE", "bookmarks", "OLD.user_id"),
+        # not search, the check times or the dead state: those change in the background without anything to show
+        ("bm_upd", "UPDATE OF title, url, notes, color, category_id, position", "bookmarks", "NEW.user_id"),
+        ("tag_ins", "INSERT", "bookmark_tags", "(SELECT user_id FROM bookmarks WHERE id=NEW.bookmark_id)"),
+        ("tag_del", "DELETE", "bookmark_tags", "(SELECT user_id FROM bookmarks WHERE id=OLD.bookmark_id)"),
+        ("tab_ins", "INSERT", "tabs", "NEW.user_id"),
+        ("tab_upd", "UPDATE", "tabs", "NEW.user_id"),
+        ("tab_del", "DELETE", "tabs", "OLD.user_id"),
+        ("cat_ins", "INSERT", "categories", "NEW.user_id"),
+        ("cat_upd", "UPDATE", "categories", "NEW.user_id"),
+        ("cat_del", "DELETE", "categories", "OLD.user_id"),
+    ))
+
+
 def connect() -> sqlite3.Connection:
     # isolation_level=None: autocommit, transactions are opened explicitly with tx()
     con = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None, check_same_thread=False)
@@ -171,6 +193,9 @@ def init() -> None:
                            ("checked_at", "INTEGER"), ("meta_at", "INTEGER")):
             if name not in have:
                 con.execute(f"ALTER TABLE bookmarks ADD COLUMN {name} {decl}")
+        if "rev" not in {r[1] for r in con.execute("PRAGMA table_info(users)")}:
+            con.execute("ALTER TABLE users ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
+        con.executescript(REV_TRIGGERS)
         if "remember" not in {r[1] for r in con.execute("PRAGMA table_info(sessions)")}:
             con.execute("ALTER TABLE sessions ADD COLUMN remember INTEGER NOT NULL DEFAULT 1")
         # these indexes reference the columns added just above, so they come after the migration

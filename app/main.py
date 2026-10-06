@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -498,6 +498,47 @@ def logout(request: Request, response: Response, con=Depends(get_db)):
 @app.get("/api/me")
 def me(c: Ctx = Depends(ctx)):
     return user_json(c)
+
+
+EVENT_POLL = 1.5        # seconds between looks at the change counter
+EVENT_PING = 25         # a comment line now and then keeps proxies from closing a quiet stream
+EVENT_LIFETIME = 300    # then the stream ends and the browser reconnects (and the session is checked again)
+
+
+@app.get("/api/events")
+async def events(request: Request, c: Ctx = Depends(ctx)):
+    """Server-sent events: one message whenever this user's bookmarks, tags, categories or tabs change."""
+    uid = c.uid
+
+    async def stream():
+        con = db.connect()
+        try:
+            def rev():
+                row = con.execute("SELECT rev FROM users WHERE id=?", (uid,)).fetchone()
+                return row[0] if row else None
+
+            last = await run_in_threadpool(rev)
+            yield f"retry: 3000\nevent: hello\ndata: {last}\n\n"
+            started, quiet = time.monotonic(), 0.0
+            while time.monotonic() - started < EVENT_LIFETIME:
+                await asyncio.sleep(EVENT_POLL)
+                if await request.is_disconnected():
+                    return
+                now = await run_in_threadpool(rev)
+                if now is None:  # the account was deleted
+                    return
+                if now != last:
+                    last, quiet = now, 0.0
+                    yield f"data: {now}\n\n"
+                else:
+                    quiet += EVENT_POLL
+                    if quiet >= EVENT_PING:
+                        quiet = 0.0
+                        yield ": ping\n\n"
+        finally:
+            con.close()
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
 
 class SettingsPatch(BaseModel):
