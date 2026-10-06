@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at INTEGER NOT NULL,
     last_seen  INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
+    expires_at INTEGER NOT NULL,
+    remember   INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS invites (
     code       TEXT PRIMARY KEY,
@@ -170,6 +171,8 @@ def init() -> None:
                            ("checked_at", "INTEGER"), ("meta_at", "INTEGER")):
             if name not in have:
                 con.execute(f"ALTER TABLE bookmarks ADD COLUMN {name} {decl}")
+        if "remember" not in {r[1] for r in con.execute("PRAGMA table_info(sessions)")}:
+            con.execute("ALTER TABLE sessions ADD COLUMN remember INTEGER NOT NULL DEFAULT 1")
         # these indexes reference the columns added just above, so they come after the migration
         con.execute("CREATE INDEX IF NOT EXISTS bookmarks_checked ON bookmarks(checked_at)")
         con.execute("CREATE INDEX IF NOT EXISTS bookmarks_meta ON bookmarks(meta_at)")

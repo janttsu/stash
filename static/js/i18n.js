@@ -82,6 +82,7 @@ export const FI = {
   'Username': 'Käyttäjätunnus',
   'Password': 'Salasana',
   'Password (at least 8 characters)': 'Salasana (vähintään 8 merkkiä)',
+  'Remember this browser for 30 days': 'Muista tämä selain 30 päivää',
   'Password again': 'Salasana uudelleen',
   'Code from your authenticator app': 'Todennussovelluksen koodi',
   'Create account': 'Luo tili',

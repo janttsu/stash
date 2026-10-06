@@ -28,7 +28,10 @@ FAVICONS = db.DATA / "favicons"
 ORIGIN = os.environ.get("STASH_ORIGIN", "http://localhost:8003")
 COOKIE = "stash_session"
 SECURE_COOKIE = os.environ.get("STASH_INSECURE_COOKIE") != "1"
-SESSION_TTL = 90 * 86400
+# "Remember this browser": signed in for 30 days from signing in. Otherwise the cookie lasts until the browser
+# closes, and the session ends on the server after 12 hours without use.
+REMEMBER_TTL = 30 * 86400
+BROWSER_TTL = 12 * 3600
 # STASH_REGISTRATION fixes who can create an account: invite (the default: an invitation link is needed), open
 # (anyone) or closed. When it is unset, the administrator chooses in Settings → Users and registration and the
 # choice is stored in the database.
@@ -132,12 +135,15 @@ def ctx(request: Request, con=Depends(get_db)) -> Ctx:
         raise err(401, "not_authenticated")
     th, t = security.token_hash(token), db.now()
     row = con.execute(
-        "SELECT u.*, s.last_seen FROM sessions s JOIN users u ON u.id=s.user_id"
+        "SELECT u.*, s.last_seen, s.remember FROM sessions s JOIN users u ON u.id=s.user_id"
         " WHERE s.token_hash=? AND s.expires_at>?", (th, t)).fetchone()
     if not row:
         raise err(401, "not_authenticated")
-    if t - row["last_seen"] > 3600:
-        con.execute("UPDATE sessions SET last_seen=?, expires_at=? WHERE token_hash=?", (t, t + SESSION_TTL, th))
+    if row["remember"]:  # a fixed 30 days from signing in
+        if t - row["last_seen"] > 3600:
+            con.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (t, th))
+    elif t - row["last_seen"] > 300:  # this browser only: ends after a while without use
+        con.execute("UPDATE sessions SET last_seen=?, expires_at=? WHERE token_hash=?", (t, t + BROWSER_TTL, th))
     return Ctx(con, row)
 
 
@@ -157,12 +163,14 @@ def user_json(c: Ctx) -> dict:
             "favicon_rev": db.get_config(c.con, "favicon_rev", "")}
 
 
-def start_session(con, response: Response, user_id: int) -> None:
+def start_session(con, response: Response, user_id: int, remember: bool = True) -> None:
     token, t = security.new_token(), db.now()
-    con.execute("INSERT INTO sessions(token_hash, user_id, created_at, last_seen, expires_at) VALUES(?,?,?,?,?)",
-                (security.token_hash(token), user_id, t, t, t + SESSION_TTL))
-    response.set_cookie(COOKIE, token, max_age=400 * 86400, httponly=True, secure=SECURE_COOKIE,
-                        samesite="lax", path="/")
+    ttl = REMEMBER_TTL if remember else BROWSER_TTL
+    con.execute("INSERT INTO sessions(token_hash, user_id, created_at, last_seen, expires_at, remember)"
+                " VALUES(?,?,?,?,?,?)", (security.token_hash(token), user_id, t, t, t + ttl, int(remember)))
+    # without max_age the browser forgets the cookie when it closes
+    response.set_cookie(COOKIE, token, max_age=REMEMBER_TTL if remember else None, httponly=True,
+                        secure=SECURE_COOKIE, samesite="lax", path="/")
 
 
 def clean_text(value: str, limit: int) -> str:
@@ -403,6 +411,7 @@ class Login(BaseModel):
     username: str = Field(max_length=100)
     password: str = Field(max_length=200)
     totp: str = ""
+    remember: bool = False
 
 
 def registration_mode(con) -> str:
@@ -470,7 +479,7 @@ def login(body: Login, request: Request, response: Response, con=Depends(get_db)
                 limiter.hit(key)
             raise err(401, "bad_totp")
         con.execute("UPDATE users SET totp_last=? WHERE id=?", (counter, user["id"]))
-    start_session(con, response, user["id"])
+    start_session(con, response, user["id"], body.remember)
     return {"ok": True}
 
 
