@@ -1,4 +1,4 @@
-"""Plain-text views of a proposal's preview and of a set, shared by the TUI and `stashai ask`."""
+"""Plain-text views of a proposal's preview and of a set, shared by the MCP server and the terminal commands."""
 from __future__ import annotations
 
 from stashai.store import Store, short_url

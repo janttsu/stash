@@ -1,7 +1,7 @@
 # Stash
 
 A self-hosted bookmark manager you can use in the browser, from other computers through an API, and in
-plain language with a language model running on your own machine.
+plain language from AI assistants such as Qwen Code or Claude Code through its MCP server.
 
 ![The Dashboard: tabs, coloured categories in columns, bookmarks with site icons](docs/screenshots/dashboard.png)
 
@@ -11,9 +11,10 @@ plain language with a language model running on your own machine.
 device setting.</sub>
 
 **Everything stays in your hands.** Stash runs on your own server, and your bookmarks, browsing history and
-change history live in your own database. The language model runs on your own computer (Ollama), so no cloud
-service sees what you save, what you read or what you ask. That is the big advantage of hosting it yourself:
-you get real use out of your browsing history without handing it to anyone.
+change history live in your own database. You choose which language model, if any, gets to see them: point
+your MCP client at a model on your own computer and no cloud service sees what you save, what you read or
+what you ask. That is the big advantage of hosting it yourself: you get real use out of your browsing history
+without handing it to anyone.
 
 ## What it consists of
 
@@ -29,13 +30,14 @@ you get real use out of your browsing history without handing it to anyone.
      browser's language).
    - **API** (`/api/v1`) with API keys: all bookmarks at once, search, and changes with exact previews.
      Every change can be undone.
-2. **stashai** (`client/`): a Linux terminal program you give instructions in plain language ("move
-   everything about company X to tag Y", "check whether these links still work"). A language model on your own
-   computer studies the bookmarks through the API, can read web pages and your browsing history, and proposes
-   changes. Nothing changes until you accept the preview, and everything can be undone.
-   See [`client/README.md`](client/README.md).
+2. **stashai** (`client/`): an **MCP server** (`stashai mcp`) for Qwen Code, Claude Code, Gemini CLI and
+   other MCP clients, plus terminal helpers. You give the client instructions in plain language ("move
+   everything about company X to tag Y", "check whether these links still work"); its model studies the
+   bookmarks with stashai's tools, can read web pages and your browsing history, and previews every change as
+   an exact dry run. Nothing changes until you agree to the preview, and everything can be undone.
+   See [`client/README.md`](client/README.md) for installing it and connecting a client.
 3. **Browsing history sync** (`scripts/stash-history-sync.py`): a small script (macOS and Linux, plain
-   Python 3) that sends Firefox's visit counts to Stash every few hours. Then stashai knows which bookmarks you
+   Python 3) that sends Firefox's visit counts to Stash every few hours. Then the assistant knows which bookmarks you
    really use: it can bring the most used ones to the Dashboard, order bookmarks and categories by use, find
    often visited pages that are not bookmarked yet, and suggest cleaning up the ones unused for years. The
    history is stored only on your own server, is never part of the bookmark export and can be deleted per
@@ -53,7 +55,7 @@ you get real use out of your browsing history without handing it to anyone.
 | `app/api_v1.py` | `/api/v1` for API keys, plus managing keys and the change history |
 | `app/history.py` | Browsing history sent by devices: upload, visit counts for bookmarks, search |
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
-| `client/` | The stashai terminal program (its own Python package) |
+| `client/` | stashai: the MCP server and terminal helpers (its own Python package) |
 | `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
 | `static/` | The web UI: native ES modules, no build step |
 | `extension/` | Browser extension (downloadable from the app at `/extension.zip`) |
@@ -93,6 +95,30 @@ While the variable is set, the setting in Settings → Users and registration is
 
 Environment variables: `STASH_ORIGIN` (public address), `STASH_DATA` (data directory, default `./data`),
 `STASH_REGISTRATION` (see above), `STASH_MAINTENANCE` (`off` turns the background upkeep off; see below).
+
+## Using Stash from an AI assistant (MCP)
+
+stashai turns Stash into an MCP server, so Qwen Code, Claude Code, Gemini CLI or any other MCP client can
+search, tidy and fix your bookmarks in plain language. On the computer where the client runs:
+
+```sh
+pipx install --force https://stash.example.com/dl/stashai-<version>-py3-none-any.whl   # Settings → API keys shows the exact command
+stashai login https://stash.example.com      # paste an API key with "Allow changes"
+stashai doctor                                # checks the connection and prints the client settings
+```
+
+Then register the server with your client. Qwen Code and Gemini CLI read it from `~/.qwen/settings.json` or
+`~/.gemini/settings.json`:
+
+```json
+{ "mcpServers": { "stash": { "command": "stashai", "args": ["mcp"] } } }
+```
+
+Claude Code: `claude mcp add stash -- stashai mcp`. Now ask, for example "which bookmarks about Python have no
+tags? suggest tags for them". The model finds bookmarks as named sets, every change is first shown as an exact
+dry-run preview, and only `apply_changes` with that preview's id changes anything; it is refused if the
+bookmarks changed after the preview. Every applied change can be undone. Keep `apply_changes` behind the
+client's confirmation prompt. The full tool list and options are in [`client/README.md`](client/README.md).
 
 ## The API and stashai
 
@@ -169,7 +195,7 @@ python3 ~/stash-history-sync.py --schedule    # sends every 6 hours (launchd / c
 .venv/bin/python tests/smoke.py    # the web API end to end, throwaway database
 .venv/bin/python tests/api_v1.py   # API keys, /api/v1, previews and undo
 .venv/bin/python tests/history.py  # the sync script against a fake Firefox profile, the history API, ordering
-client/.venv/bin/python -m pytest -q client/tests   # stashai: search, agent, model connection, web, TUI
+client/.venv/bin/python -m pytest -q client/tests   # stashai: search, sets, previews, web, MCP tools
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
 node tools/check-i18n.mjs          # missing or broken Finnish and Swedish translations
 node tools/screenshots.mjs         # the README screenshots, from a demo instance on port 8014

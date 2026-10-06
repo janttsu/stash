@@ -1,3 +1,3 @@
-"""stashai: manage Stash bookmarks in plain language with a local language model."""
+"""stashai: your Stash bookmarks as an MCP server, plus terminal helpers."""
 
-__version__ = "0.1.11"
+__version__ = "0.2.0"

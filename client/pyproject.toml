@@ -1,13 +1,13 @@
 [project]
 name = "stashai"
-version = "0.1.11"
-description = "Manage your Stash bookmarks in plain language from the terminal, with a local LLM"
+version = "0.2.0"
+description = "Your Stash bookmarks as an MCP server (Qwen Code, Claude Code, Gemini CLI) plus terminal helpers"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
   "httpx>=0.27,<1",
-  "textual>=3.7,<4",
+  "mcp>=1.10,<2",
 ]
 
 [project.optional-dependencies]
