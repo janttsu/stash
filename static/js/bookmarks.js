@@ -24,6 +24,12 @@ export async function renderBookmarks(container, preset) {
   checkDeadLinkJob();
 }
 
+/** Load the list again after a change made elsewhere (another tab, device, an API key or the server). */
+export async function refreshBookmarks() {
+  if (!root || !mounted()) return;
+  await Promise.all([loadDash(), reload()]);
+}
+
 export function leaveBookmarks() {
   clearTimeout(pollTimer);
   pollTimer = null;

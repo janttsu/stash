@@ -1,8 +1,8 @@
 // Entry point of the main app: session check, header, hash routing.
 import { renderAuth } from './auth.js';
-import { leaveBookmarks, renderBookmarks } from './bookmarks.js';
+import { leaveBookmarks, refreshBookmarks, renderBookmarks } from './bookmarks.js';
 import { api, applyTheme, attempt, fill, h, icon, showMenu, state } from './core.js';
-import { renderDashboard } from './dashboard.js';
+import { refresh as refreshDashboard, renderDashboard } from './dashboard.js';
 import { setLang, t } from './i18n.js';
 import { renderSettings } from './settings.js';
 import { bookmarkDialog } from './widgets.js';
@@ -22,7 +22,46 @@ async function boot() {
   applyTheme(state.user.settings.theme);
   shell();
   window.addEventListener('hashchange', route);
+  live();
   return route();
+}
+
+// --- live updates: the page redraws itself when the bookmarks change anywhere -----------------
+// The server sends the user's change counter whenever it moves. A redraw waits while the person is busy
+// (a dialog or menu is open, something is being dragged, a field has focus) or the page is not visible.
+let liveTimer = null;
+
+function busy() {
+  if (document.hidden || document.querySelector('dialog[open], .menu, .sortable-chosen, .sortable-drag')) return true;
+  const el = document.activeElement;
+  return Boolean(el && el.closest('#view') && el.matches('input, textarea, select, [contenteditable]'));
+}
+
+function scheduleRedraw() {
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(async function redraw() {
+    if (busy()) {
+      liveTimer = setTimeout(redraw, 1500);
+      return;
+    }
+    const y = window.scrollY;
+    if (current === 'dashboard') await refreshDashboard();
+    else if (current === 'bookmarks') await refreshBookmarks();
+    else await route();
+    window.scrollTo(0, y);
+  }, 400);
+}
+
+function live() {
+  if (!('EventSource' in window)) return;
+  let rev = null;
+  const seen = (e) => {
+    if (rev !== null && e.data !== rev) scheduleRedraw();
+    rev = e.data;
+  };
+  const source = new EventSource('/api/events');
+  source.addEventListener('hello', seen);  // also after a reconnect: changes made meanwhile are caught here
+  source.onmessage = seen;
 }
 
 function shell() {

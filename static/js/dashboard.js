@@ -23,7 +23,7 @@ export async function renderDashboard(container, focus) {
   draw();
 }
 
-async function refresh() {
+export async function refresh() {
   await loadDash();
   draw();
 }

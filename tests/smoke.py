@@ -66,6 +66,27 @@ with TestClient(app):  # runs startup (schema creation)
     assert "max-age=2592000" in long.headers["set-cookie"].lower()
     assert tuple(session_of(long)) == (1, 30 * 86400)
 
+    # --- live updates: the change counter moves with every visible change, from any writer ---
+    def rev(name):
+        return db.connect().execute("SELECT rev FROM users WHERE username=?", (name,)).fetchone()[0]
+
+    r0, other0 = rev("alice"), rev("bob")
+    live_id = ok(a.post("/api/bookmarks", json={"url": "https://live.example/", "tags": ["x"]}))["id"]
+    r1 = rev("alice")
+    assert r1 > r0 and rev("bob") == other0, "only the owner's counter moves"
+    con = db.connect()
+    con.execute("UPDATE bookmarks SET checked_at=1, meta_at=1, dead_streak=1, search='x' WHERE id=?", (live_id,))
+    assert rev("alice") == r1, "background bookkeeping does not count as a change"
+    con.execute("UPDATE bookmarks SET title='direct' WHERE id=?", (live_id,))  # e.g. the upkeep or a server command
+    assert rev("alice") > r1
+    ok(a.delete(f"/api/bookmarks/{live_id}"))
+    main_module.EVENT_LIFETIME = 0  # end the stream right after the first message
+    with a.stream("GET", "/api/events") as stream:
+        assert stream.status_code == 200 and stream.headers["content-type"].startswith("text/event-stream")
+        first = next(stream.iter_text())
+        assert "event: hello" in first and f"data: {rev('alice')}" in first
+    ok(anon.get("/api/events"), 401)
+
     # --- dashboard structure ---
     dash = ok(a.get("/api/dashboard"))
     assert [t["name"] for t in dash["tabs"]] == ["Koti"] and dash["categories"][0]["name"] == "Suosikit"
