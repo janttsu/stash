@@ -113,6 +113,15 @@ class Session:
         return (f"{set_name}: {len(ids)} bookmarks, showing {offset + 1}–{offset + len(part)}\n"
                 + "\n".join(self.store.line(i) for i in part) + more)
 
+    def list_urls(self, set_name: str, offset: int = 0, limit: int = 500) -> str:
+        """The whole addresses of a set as JSON, for programs that open the pages themselves."""
+        self.ensure()
+        ids = self.store.resolve(set_name)
+        offset, limit = max(0, offset), max(1, min(1000, limit))
+        items = [{"id": i, "url": self.store.bookmarks[i].url, "title": self.store.bookmarks[i].title}
+                 for i in ids[offset:offset + limit]]
+        return json.dumps({"set": set_name, "total": len(ids), "offset": offset, "items": items}, ensure_ascii=False)
+
     def combine(self, a: str, b: str, how: str = "union", label: str = "") -> str:
         self.ensure()
         left, right = self.store.resolve(a), self.store.resolve(b)

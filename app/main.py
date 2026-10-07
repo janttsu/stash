@@ -1549,14 +1549,15 @@ app.include_router(api_v1.v1)
 app.include_router(api_v1.session_api)
 
 HISTORY_SCRIPT = BASE / "scripts" / "stash-history-sync.py"
+SCRIPTS = {p.name: p for p in (HISTORY_SCRIPT, BASE / "scripts" / "stash-linkcheck.py")}
 
 
 @app.api_route("/dl/{name}", methods=["GET", "HEAD"], include_in_schema=False)
 def download(name: str):
-    """The browsing history sync script."""
-    if name != HISTORY_SCRIPT.name:
+    """The scripts that run on the user's own computer: history sync and the link check."""
+    if name not in SCRIPTS:
         raise err(404, "not_found")
-    return FileResponse(HISTORY_SCRIPT, media_type="text/x-python; charset=utf-8")
+    return FileResponse(SCRIPTS[name], media_type="text/x-python; charset=utf-8")
 
 
 # --- MCP: Stash for AI assistants (Claude Code, Qwen Code, Gemini CLI, …) at /mcp, with an API key --------------

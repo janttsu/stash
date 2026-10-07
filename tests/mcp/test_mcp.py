@@ -1,4 +1,6 @@
 """The /mcp endpoint end to end: JSON-RPC over HTTP with an API key, as Claude Code or Qwen Code send it."""
+import json
+
 from conftest import ids_by_title
 
 from app.mcpserver.store import Store
@@ -81,3 +83,18 @@ def test_read_only_and_revoked_keys(api, stash):
     assert mcp.rpc("tools/list").status_code == 401, "a revoked key stops working at once"
     other = web.patch("/api/keys/999999", json={"can_write": True})
     assert other.status_code == 404
+
+
+def test_list_urls_and_delete_by_ids(api, stash):
+    """What stash-linkcheck.py does: whole addresses of a set, then a delete by ids through a preview."""
+    mcp = Client(stash["raw"], stash["key"])
+    mcp.call("search", text=["buns"])
+    err, text = mcp.call("list_urls", set_name="S1")
+    data = json.loads(text)
+    assert not err and data["total"] == 1 and data["items"][0]["url"].startswith("http")
+    assert json.loads(mcp.call("list_urls", set_name="ALL", limit=2)[1])["total"] == 7
+    bid = data["items"][0]["id"]
+    err, text = mcp.call("preview_changes", ops=[{"op": "delete", "ids": [bid]}], summary="Gone")
+    assert not err and "1 deleted" in text
+    err, text = mcp.call("apply_changes", preview_id=text.split()[1].rstrip(":"))
+    assert not err and bid not in Store(api.snapshot()).bookmarks

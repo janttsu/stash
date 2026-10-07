@@ -189,6 +189,13 @@ def build_server(origin: str) -> FastMCP:
         return await run(ctx, "show", set_name, offset, limit)
 
     @mcp.tool()
+    async def list_urls(ctx: Context, set_name: Annotated[str, Field(description="S1, S2, … or ALL")],
+                        offset: int = 0, limit: int = 500) -> str:
+        """The whole addresses of a set as JSON ({"total", "items": [{"id", "url", "title"}]}), at most 1000 at a
+        time. For programs that open the pages themselves; `show` reads better for a person."""
+        return await run(ctx, "list_urls", set_name, offset, limit)
+
+    @mcp.tool()
     async def combine(ctx: Context, a: str, b: str, how: Literal["union", "intersect", "minus"] = "union",
                       label: str = "") -> str:
         """Make a new set from two sets."""
