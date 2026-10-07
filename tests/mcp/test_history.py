@@ -2,7 +2,7 @@ import time
 
 from conftest import ids_by_title
 
-from stashai.session import Session
+from app.mcpserver.session import Session
 
 
 def send_history(api, items):

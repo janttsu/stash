@@ -1,4 +1,4 @@
-"""Browsing history sent by your devices (scripts/stash-history-sync.py), for stashai to study.
+"""Browsing history sent by your devices (scripts/stash-history-sync.py), for the assistant (MCP) to study.
 
 Each device ("source") sends one row per address it has visited, with visit counts for the last
 30, 90 and 365 days as of the sync. A sync replaces the device's earlier rows. The history is

@@ -5,9 +5,9 @@ import httpx
 import pytest
 from conftest import ids_by_title
 
-from stashai.render import diff_line
-from stashai.session import Session
-from stashai.web import Page, Web, parse_duckduckgo, parse_html
+from app.mcpserver.render import diff_line
+from app.mcpserver.session import Session
+from app.mcpserver.web import Page, Web, parse_duckduckgo, parse_html
 
 ADDRS = {"site.example": "93.184.216.34", "new.example": "93.184.216.35", "local.example": "127.0.0.1",
          "intra.example": "10.1.2.3"}
@@ -93,7 +93,7 @@ def test_verdicts():
 
 def test_local_addresses_are_refused():
     w = web()
-    assert "this computer" in w.fetch("http://local.example/").error
+    assert "this server" in w.fetch("http://local.example/").error
     assert "local network" in w.fetch("http://intra.example/").error
     assert "only http(s)" in w.fetch("file:///etc/passwd").error
     assert web(allow_private=True).fetch("http://intra.example/").error == ""
@@ -225,47 +225,7 @@ def test_refresh_titles_and_icons(api, monkeypatch):
     assert out.startswith("titles: 0 would change, 1 already right, 1 could not be read") and "Preview" not in out
 
 
-def titles_of(api):
-    return {b["id"]: b["title"] for b in api.snapshot()["bookmarks"]}
-
-
-def test_titles_command_fixes_unnamed_then_all(api):
-    from stashai import cli
-
-    made = api.changes([{"op": "create", "url": u, "title": t} for u, t in [
-        ("https://site.example/buns", "https://site.example/buns"),   # unnamed: just the address
-        ("https://site.example/tea", "A title I wrote"),              # named, but the page differs
-        ("https://site.example/forbidden", "Keep me"),               # 403: unreadable, must stay
-        ("https://site.example/blocked", "https://site.example/blocked"),  # junk page title, must stay
-    ]], "seed", dry_run=False)
-    ids = [e["id"] for e in made["diff"]]
-    buns, tea, forbidden, blocked = ids
-
-    # default: only the empty / address-only title is filled, from the page read on this computer
-    rc = cli.cmd_titles(None, every=False, host=None, tag=None, icons=False, dry_run=False, yes=True,
-                        limit=0, workers=4, api=api, web=web())
-    assert rc == 0
-    now = titles_of(api)
-    assert now[buns] == "Old title"  # the page's own <title>; og:title is only a fallback
-    assert now[tea] == "A title I wrote", "a title the user wrote is left alone without --all"
-    assert now[forbidden] == "Keep me" and now[blocked] == "https://site.example/blocked"
-
-    # --all re-reads every match, so the present-but-wrong title is corrected too
-    rc = cli.cmd_titles(None, every=True, host=None, tag=None, icons=False, dry_run=False, yes=True,
-                        limit=0, workers=4, api=api, web=web())
-    assert titles_of(api)[tea] == "Green tea – Teas"
-
-    # dry run changes nothing; host filter narrows the set
-    api.changes([{"op": "update", "id": tea, "title": "https://site.example/tea"}], "bad again", dry_run=False)
-    rc = cli.cmd_titles(None, every=False, host="nowhere.example", tag=None, icons=False, dry_run=False,
-                        yes=True, limit=0, workers=4, api=api, web=web())
-    assert titles_of(api)[tea] == "https://site.example/tea", "no bookmark on that host, so nothing changed"
-    rc = cli.cmd_titles(None, every=False, host="site.example", tag=None, icons=False, dry_run=True,
-                        yes=True, limit=0, workers=4, api=api, web=web())
-    assert titles_of(api)[tea] == "https://site.example/tea", "dry run leaves the database untouched"
-
-
 def test_web_can_be_turned_off(api):
     s = session(api, web=None)
-    with pytest.raises(ValueError, match="web access is turned off"):
+    with pytest.raises(ValueError, match="reading web pages is turned off"):
         s.read_page(url="https://site.example/")

@@ -1,7 +1,7 @@
-"""Plain-text views of a proposal's preview and of a set, shared by the MCP server and the terminal commands."""
+"""Plain-text views of a proposal's preview and of a set, used by the MCP tools."""
 from __future__ import annotations
 
-from stashai.store import Store, short_url
+from .store import Store, short_url
 
 
 def tag_change(before: list[str], after: list[str]) -> str:
