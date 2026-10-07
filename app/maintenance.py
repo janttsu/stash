@@ -194,6 +194,9 @@ async def refresh_meta_batch(con, client, uids: list[int], limit: int = META_BAT
 async def cycle(client) -> dict:
     con = db.connect()
     try:
+        from .main import purge_trash
+
+        purge_trash(con)
         uids = active_user_ids(con)
         for uid in uids:
             reconcile_duplicates(con, uid)

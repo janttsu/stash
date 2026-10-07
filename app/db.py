@@ -139,6 +139,31 @@ CREATE TABLE IF NOT EXISTS history (
     PRIMARY KEY (user_id, source, url)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS history_key ON history(user_id, url_key);
+-- deleted bookmarks, kept for TRASH_DAYS so they can be restored; filled by a trigger, so every way of
+-- deleting (one bookmark, many, a whole category or tab, an API key) ends up here
+CREATE TABLE IF NOT EXISTS trash (
+    id            INTEGER PRIMARY KEY,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    bookmark_id   INTEGER NOT NULL,
+    title         TEXT NOT NULL,
+    url           TEXT NOT NULL,
+    host          TEXT NOT NULL DEFAULT '',
+    notes         TEXT NOT NULL DEFAULT '',
+    color         TEXT NOT NULL DEFAULT '',
+    category_id   INTEGER,
+    tab_name      TEXT,
+    category_name TEXT,
+    tags          TEXT NOT NULL DEFAULT '[]',
+    created_at    INTEGER NOT NULL,
+    deleted_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS trash_user ON trash(user_id, deleted_at);
+-- names of categories being deleted, so bookmarks deleted along with them still know where they were
+CREATE TABLE IF NOT EXISTS trash_place (
+    category_id   INTEGER PRIMARY KEY,
+    tab_name      TEXT,
+    category_name TEXT
+);
 CREATE TABLE IF NOT EXISTS history_sources (
     user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     source    TEXT NOT NULL,
@@ -168,7 +193,36 @@ REV_TRIGGERS = "".join(
         ("cat_ins", "INSERT", "categories", "NEW.user_id"),
         ("cat_upd", "UPDATE", "categories", "NEW.user_id"),
         ("cat_del", "DELETE", "categories", "OLD.user_id"),
+        ("trash_del", "DELETE", "trash", "OLD.user_id"),
     ))
+
+TRASH_TRIGGERS = """
+CREATE TRIGGER IF NOT EXISTS trash_tab BEFORE DELETE ON tabs BEGIN
+    INSERT OR REPLACE INTO trash_place SELECT id, OLD.name, name FROM categories WHERE tab_id=OLD.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trash_cat BEFORE DELETE ON categories BEGIN
+    INSERT OR REPLACE INTO trash_place VALUES (OLD.id,
+        COALESCE((SELECT name FROM tabs WHERE id=OLD.tab_id),
+                 (SELECT tab_name FROM trash_place WHERE category_id=OLD.id)), OLD.name);
+END;
+-- not when the whole account goes: then its user row is already gone
+CREATE TRIGGER IF NOT EXISTS trash_bm BEFORE DELETE ON bookmarks
+WHEN EXISTS (SELECT 1 FROM users WHERE id=OLD.user_id) BEGIN
+    INSERT INTO trash(user_id, bookmark_id, title, url, host, notes, color, category_id, tab_name, category_name,
+                      tags, created_at, deleted_at)
+    VALUES (OLD.user_id, OLD.id, OLD.title, OLD.url, OLD.host, OLD.notes, OLD.color, OLD.category_id,
+        COALESCE((SELECT t.name FROM categories k JOIN tabs t ON t.id=k.tab_id WHERE k.id=OLD.category_id),
+                 (SELECT tab_name FROM trash_place WHERE category_id=OLD.category_id)),
+        COALESCE((SELECT name FROM categories WHERE id=OLD.category_id),
+                 (SELECT category_name FROM trash_place WHERE category_id=OLD.category_id)),
+        (SELECT json_group_array(tag) FROM bookmark_tags WHERE bookmark_id=OLD.id),
+        OLD.created_at, CAST(strftime('%s', 'now') AS INTEGER));
+END;
+-- the same address saved again (or restored): it is no longer missing
+CREATE TRIGGER IF NOT EXISTS trash_back AFTER INSERT ON bookmarks BEGIN
+    DELETE FROM trash WHERE user_id=NEW.user_id AND url=NEW.url;
+END;
+"""
 
 
 def connect() -> sqlite3.Connection:
@@ -196,6 +250,7 @@ def init() -> None:
         if "rev" not in {r[1] for r in con.execute("PRAGMA table_info(users)")}:
             con.execute("ALTER TABLE users ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
         con.executescript(REV_TRIGGERS)
+        con.executescript(TRASH_TRIGGERS)
         if "remember" not in {r[1] for r in con.execute("PRAGMA table_info(sessions)")}:
             con.execute("ALTER TABLE sessions ADD COLUMN remember INTEGER NOT NULL DEFAULT 1")
         # these indexes reference the columns added just above, so they come after the migration

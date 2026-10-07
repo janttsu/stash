@@ -1,6 +1,6 @@
 // "My Bookmarks": list view over the Catalog and the Dashboard with tag filtering, search and bulk tools.
 import {
-  api, attempt, fill, confirmBox, copyText, favicon, fmtDate, h, icon, linkAttrs, loadDash, mailBookmarks,
+  api, attempt, confirmBox, copyText, favicon, fill, fmtDate, h, icon, linkAttrs, loadDash, mailBookmarks, offerUndo,
   openModal, showMenu, state, toast,
 } from './core.js';
 import { t } from './i18n.js';
@@ -290,8 +290,9 @@ const selectionCount = () => (view.allMatching ? view.total : view.selected.size
 
 async function bulk(body, target = selectionTarget()) {
   await attempt(async () => {
-    const { count } = await api('POST', '/api/bookmarks/bulk', { ...body, ...target });
-    toast(t('{n} bookmarks updated', { n: count }));
+    const res = await api('POST', '/api/bookmarks/bulk', { ...body, ...target });
+    if (body.action === 'delete') offerUndo(res);
+    else toast(t('{n} bookmarks updated', { n: res.count }));
     await changed();
   });
 }

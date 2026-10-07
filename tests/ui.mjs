@@ -265,6 +265,35 @@ try {
   await js(`document.querySelector('dialog[open] form').requestSubmit()`);
   await until(`!document.querySelector('dialog[open]') && !!$t('.toast', 'No duplicates found.')`, 'duplicate search result');
 
+  // --- trash: a deleted bookmark can be brought back from the toast and from the Trash page ---
+  const firstTitle = await js(`return document.querySelector('.row-bm .row-bm__title').textContent`);
+  await js(`document.querySelector('.row-bm .iconbtn').click()`);
+  await waitFor('.menu');
+  await js(`$click('.menu__item', 'Delete')`);
+  await waitFor('dialog[open]');
+  await js(`$click('dialog[open] .btn', 'Delete')`);
+  await until(`!!document.querySelector('.toast--action') && document.querySelectorAll('.row-bm').length === 8`, 'undo toast after delete');
+  await shot('11b-undo-toast');
+  await js(`document.querySelector('.toast__action').click()`);
+  await until(`!!$t('.toast', 'Restored') && document.querySelectorAll('.row-bm').length === 9`, 'undo brings it back');
+  await js(`document.querySelector('.row-bm .iconbtn').click()`);
+  await waitFor('.menu');
+  await js(`$click('.menu__item', 'Delete')`);
+  await waitFor('dialog[open]');
+  await js(`$click('dialog[open] .btn', 'Delete')`);
+  await until(`document.querySelectorAll('.row-bm').length === 8`, 'deleted again');
+  await js(`$click('.top__user')`);
+  await waitFor('.menu');
+  await js(`$click('.menu__item', 'Trash')`);
+  await until(`document.querySelectorAll('.trash__item').length === 1`, 'trash page lists the bookmark');
+  check(await js(`return document.querySelector('.trash__title').textContent`) === firstTitle, 'the deleted bookmark is in the trash');
+  await shot('11c-trash');
+  await js(`$click('.trash__item .btn', 'Restore')`);
+  await until(`!!$t('.empty', 'The trash is empty.')`, 'restored from the trash page');
+  await goto('/#/bookmarks');
+  await js(HELPERS);
+  await until(`document.querySelectorAll('.row-bm').length === 9`, 'back in the list');
+
   // --- settings ---
   await goto('/#/settings');
   await js(HELPERS);
