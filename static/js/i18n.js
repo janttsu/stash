@@ -136,6 +136,17 @@ export const FI = {
   'Connect {name}': 'Yhdistä {name}',
   'The key is part of this text and is shown only once. Keep it like a password.': 'Avain on osa tätä tekstiä ja näytetään vain kerran. Säilytä se kuin salasana.',
   'Done': 'Valmis',
+  'Without this the key can only read.': 'Ilman tätä avain voi vain lukea.',
+  'Your new key': 'Uusi avaimesi',
+  'The key is shown only once. Keep it like a password; you can revoke it in Settings → Assistant (MCP).': 'Avain näytetään vain kerran. Säilytä se kuin salasana; voit mitätöidä sen kohdassa Asetukset → Tekoälyavustaja (MCP).',
+  'Create a key for a program': 'Luo avain ohjelmalle',
+  'Copy the key and paste it into the program. Programs send it in the Authorization header: “Bearer” and the key.': 'Kopioi avain ja liitä se ohjelmaan. Ohjelmat lähettävät sen Authorization-otsakkeessa: ”Bearer” ja avain.',
+  'For the browsing history script, use the button under Browsing history below.': 'Selaushistorian lähetysskriptille käytä alempana Selaushistoria-kohdan painiketta.',
+  'Create a key for the computer where you use Firefox. Copy it: it is shown only once.': 'Luo avain koneelle, jolla käytät Firefoxia. Kopioi se: se näytetään vain kerran.',
+  'Create a key for this computer': 'Luo avain tälle koneelle',
+  'Copy the key. In the next step the script asks for an API key: paste this one.': 'Kopioi avain. Seuraavassa vaiheessa skripti kysyy API-avainta: liitä tämä.',
+  'On that computer, run these in a terminal. The script asks for the address of this Stash and the key. It needs only the Python 3 of the system.': 'Aja nämä sillä koneella päätteessä. Skripti kysyy tämän Stashin osoitteen ja avaimen. Se tarvitsee vain järjestelmän oman Python 3:n.',
+  'It then sends every few hours; --dry-run shows what would be sent, --forget deletes it from here. The key appears in the key list above, where you can revoke it.': 'Sen jälkeen skripti lähettää historian muutaman tunnin välein; --dry-run näyttää mitä lähetettäisiin, --forget poistaa sen täältä. Avain näkyy yllä avainlistassa, josta voit mitätöidä sen.',
   'Password again': 'Salasana uudelleen',
   'Code from your authenticator app': 'Todennussovelluksen koodi',
   'Create account': 'Luo tili',
@@ -407,7 +418,6 @@ export const FI = {
   "Delete the history sent by {name}? A scheduled sync sends it again unless you stop it on that computer.": "Poistetaanko koneen {name} lähettämä historia? Ajastettu lähetys lähettää sen uudelleen, ellet pysäytä sitä kyseisellä koneella.",
   "No history yet.": "Historiaa ei ole vielä lähetetty.",
   "Sending the history (macOS or Linux)": "Historian lähettäminen (macOS tai Linux)",
-  "Run these in a terminal on the computer where you use Firefox. The script needs only the Python 3 of the system and an API key that can change. It sends every few hours; --dry-run shows what would be sent, --forget deletes it from here.": "Aja nämä päätteessä koneella, jolla käytät Firefoxia. Skripti tarvitsee vain järjestelmän Python 3:n ja API-avaimen, jolla on muutosoikeus. Se lähettää historian muutaman tunnin välein; --dry-run näyttää mitä lähetettäisiin, --forget poistaa sen täältä.",
 };
 
 let lang = 'en';

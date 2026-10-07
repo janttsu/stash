@@ -212,7 +212,8 @@ Sending the history from the Mac (or Linux computer) where Firefox is used:
 
 ```sh
 curl -o ~/stash-history-sync.py https://stash.example.com/dl/stash-history-sync.py
-python3 ~/stash-history-sync.py --setup       # Stash address, an API key that can change, a name for this computer
+python3 ~/stash-history-sync.py --setup       # Stash address, a key (Settings → Browsing history → Create a key
+                                              # for this computer), a name for this computer
 python3 ~/stash-history-sync.py --dry-run     # shows what would be sent
 python3 ~/stash-history-sync.py --schedule    # sends every 6 hours (launchd / cron)
 ```

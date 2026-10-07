@@ -95,6 +95,31 @@ function importExport() {
 
 // --- API keys and the terminal client ------------------------------------------
 
+// the key list in the assistant card, so a key made elsewhere on the page shows up there at once
+let redrawKeys = () => {};
+
+/** A plain API key for a program: name it, create it, show it once with a hint on where to paste it. */
+async function createKey({ title, name: defaultName, askWrite = true, hint }) {
+  const name = h('input', { type: 'text', class: 'input', required: true, maxLength: 100, value: defaultName || '' });
+  const write = h('input', { type: 'checkbox', checked: true });
+  const created = await openModal(title, h('div', { class: 'form' },
+    h('label', { class: 'field' }, h('span', null, t('Name of the key')), name),
+    askWrite && h('label', { class: 'check' }, write, h('span', null, t('Allow changes'),
+      h('small', { class: 'muted block' }, t('Without this the key can only read.'))))), [
+    { label: t('Cancel') },
+    { label: t('Create key'), kind: 'primary', action: () => api('POST', '/api/keys', { name: name.value, can_write: !askWrite || write.checked }) },
+  ]);
+  if (!created) return;
+  redrawKeys();
+  await openModal(t('Your new key'), h('div', { class: 'form' },
+    h('p', null, hint),
+    h('input', { type: 'text', class: 'input mono', readOnly: true, value: created.key, onfocus: (e) => e.target.select() }),
+    h('p', { class: 'muted small' }, t('The key is shown only once. Keep it like a password; you can revoke it in Settings → Assistant (MCP).'))), [
+    { label: t('Copy'), action: async () => { await copyText(created.key); return false; } },
+    { label: t('Done'), kind: 'primary', action: () => true },
+  ]);
+}
+
 function apiKeys() {
   const card = h('section', { class: 'card' });
   const url = `${location.origin}/mcp`;
@@ -150,6 +175,14 @@ function apiKeys() {
             },
           }, t('Revoke'))))))))
         : h('p', { class: 'muted' }, t('No keys yet.')),
+      h('div', { class: 'row' }, h('button', {
+        type: 'button', class: 'btn',
+        onclick: () => createKey({
+          title: t('Create a key for a program'),
+          hint: t('Copy the key and paste it into the program. Programs send it in the Authorization header: “Bearer” and the key.'),
+        }),
+      }, t('Create a key for a program'))),
+      h('p', { class: 'muted small' }, t('For the browsing history script, use the button under Browsing history below.')),
       h('h3', null, t('Your rules for the assistant')),
       h('p', { class: 'muted' }, t('Standing instructions in your own words. The assistant reads them before every change.')),
       rules,
@@ -159,6 +192,7 @@ function apiKeys() {
       }, t('Save rules'))),
       h('p', { class: 'muted small' }, t('Programs of your own can use the same keys with the API at {url}.', { url: `${location.origin}/api/v1` })));
   };
+  redrawKeys = draw;  // the card on the page now: a key made elsewhere on the page is listed at once
   draw();
   return card;
 }
@@ -274,10 +308,20 @@ function browsingHistory() {
           }, t('Delete'))))))))
         : h('p', { class: 'muted' }, t('No history yet.')),
       h('h3', null, t('Sending the history (macOS or Linux)')),
-      h('p', null, t('Run these in a terminal on the computer where you use Firefox. The script needs only the Python 3 of the system and an API key that can change. It sends every few hours; --dry-run shows what would be sent, --forget deletes it from here.')),
-      h('div', { class: 'row' },
-        h('textarea', { class: 'input mono', rows: 3, readOnly: true, value: commands, onfocus: (e) => e.target.select() }),
-        h('button', { type: 'button', class: 'btn', onclick: () => copyText(commands) }, t('Copy'))));
+      h('ol', { class: 'steps' },
+        h('li', null, t('Create a key for the computer where you use Firefox. Copy it: it is shown only once.'),
+          h('div', { class: 'row' }, h('button', {
+            type: 'button', class: 'btn primary',
+            onclick: () => createKey({
+              title: t('Create a key for this computer'), name: t('Browsing history'), askWrite: false,
+              hint: t('Copy the key. In the next step the script asks for an API key: paste this one.'),
+            }),
+          }, t('Create a key for this computer')))),
+        h('li', null, t('On that computer, run these in a terminal. The script asks for the address of this Stash and the key. It needs only the Python 3 of the system.'),
+          h('div', { class: 'row' },
+            h('textarea', { class: 'input mono', rows: 3, readOnly: true, value: commands, onfocus: (e) => e.target.select() }),
+            h('button', { type: 'button', class: 'btn', onclick: () => copyText(commands) }, t('Copy'))))),
+      h('p', { class: 'muted small' }, t('It then sends every few hours; --dry-run shows what would be sent, --forget deletes it from here. The key appears in the key list above, where you can revoke it.')));
   };
   draw();
   return card;
