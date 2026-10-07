@@ -48,6 +48,10 @@ without handing it to anyone.
    history is stored only on your own server, is never part of the bookmark export and can be deleted per
    device in Settings. Before sending, query parameters that often carry secrets (token, session, code, …) are
    removed, and whole sites can be left out.
+4. **Link check with a local model** (`scripts/stash-linkcheck.py`): opens each bookmark in a headless Chromium
+   on your own computer, clicks cookie banners and age confirmations away, and lets a model in Ollama decide
+   whether the content still exists ("video removed", "not available", 404, a parked domain). It lists the
+   gone ones and removes them through MCP only after you agree (see *Checking links with a local model*).
 
 ## Layout
 
@@ -62,6 +66,7 @@ without handing it to anyone.
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
 | `app/mcpserver/` | The MCP endpoint `/mcp`: its tools, named result sets, previews and page reading |
 | `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
+| `scripts/stash-linkcheck.py` | Finds bookmarks whose content is gone with a local model (served at `/dl/stash-linkcheck.py`) |
 | `static/` | The web UI: native ES modules, no build step |
 | `extension/` | Browser extension (downloadable from the app at `/extension.zip`) |
 | `data/` | Database and favicon cache: not in version control, back this up |
@@ -134,6 +139,7 @@ Then ask, for example "which bookmarks about Python have no tags? suggest tags f
 | `overview` | tags with counts, tabs and categories, the size of the collection, your rules, the sets made so far |
 | `search` | finds bookmarks by words, regex, site, tags, tab, category, dates or use, and keeps them as a set (S1, S2, …) |
 | `show`, `combine` | list a set; union, intersection or difference of two sets |
+| `list_urls` | the whole addresses of a set as JSON, for programs that open the pages themselves |
 | `browsing_history` | visited addresses from your synced Firefox history, also those not bookmarked |
 | `read_page` | reads one page as text |
 | `check_links` | checks every link of a set: alive, moved, dead, unclear |
@@ -217,6 +223,37 @@ python3 ~/stash-history-sync.py --setup       # Stash address, a key (Settings �
 python3 ~/stash-history-sync.py --dry-run     # shows what would be sent
 python3 ~/stash-history-sync.py --schedule    # sends every 6 hours (launchd / cron)
 ```
+
+## Checking links with a local model
+
+The server's own link check sees only status codes. A video page that answers 200 but says "video unavailable",
+a page hidden behind a cookie or age wall, or a domain now selling something else needs a browser and someone to
+read the page. `scripts/stash-linkcheck.py` does that on your own computer with a local model in Ollama (default
+`gemma4:e4b-128k`; any model with `--model`):
+
+1. It asks Stash over MCP for the bookmarks (all, or `--tag`, `--host`, `--text`, `--tab`, `--where`).
+2. Each page is opened in a headless Chromium, a few at a time. Cookie banners and age confirmations are
+   answered like a person would; pictures and video are not downloaded.
+3. The model gets the status, redirects, final address, title, headings, the start of the text and a video
+   player's own status, and answers *exists*, *gone* or *unsure* with a short reason. Logins, captchas, blocks
+   and timeouts are *unsure* and never offered for removal.
+4. The gone ones are listed with their reasons. You answer: remove all, none, or keep the ids you name. The
+   removal is one Stash change through `preview_changes` and `apply_changes`: undoable, and the bookmarks wait
+   30 days in the trash.
+
+```sh
+sudo pacman -S --needed python chromium ollama      # Arch; Ollama also from ollama.com
+ollama pull gemma4:e4b-128k
+python -m venv ~/.local/share/stash-linkcheck
+~/.local/share/stash-linkcheck/bin/pip install playwright
+curl -o ~/stash-linkcheck.py https://stash.example.com/dl/stash-linkcheck.py
+~/.local/share/stash-linkcheck/bin/python ~/stash-linkcheck.py --setup    # Stash address and an API key
+~/.local/share/stash-linkcheck/bin/python ~/stash-linkcheck.py            # check, list, ask, remove
+```
+
+The key comes from Settings → Assistant (MCP) → Create a key for a program, with "Allow changes" (a read-only key
+can check and list but not remove). The verdicts are saved in `~/.cache/stash/linkcheck-report.json`;
+`--resume` reuses them and checks only the rest, `--no-delete` only reports, `--show-browser` shows the window.
 
 ## Tests
 
