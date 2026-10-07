@@ -1,5 +1,5 @@
 // Reusable form pieces: tag input, Dashboard/Catalog location picker, bookmark form and dialogs.
-import { api, confirmBox, h, loadDash, openModal, promptBox, state, toast } from './core.js';
+import { api, confirmBox, h, loadDash, offerUndo, openModal, promptBox, state, toast } from './core.js';
 import { t } from './i18n.js';
 
 let tagCache = null;
@@ -262,7 +262,7 @@ export async function bookmarkDialog(bookmark, defaults = {}) {
       label: t('Delete'), kind: 'danger-quiet',
       action: async () => {
         if (!await confirmBox(t('Delete this bookmark?'), { okLabel: t('Delete'), danger: true })) return false;
-        await api('DELETE', `/api/bookmarks/${bookmark.id}`);
+        offerUndo(await api('DELETE', `/api/bookmarks/${bookmark.id}`));
         return true;
       },
     });

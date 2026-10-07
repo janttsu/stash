@@ -1,6 +1,6 @@
 // Dashboard: tabs → category groups in columns → bookmarks. Everything is drag-and-drop sortable.
 import {
-  api, attempt, fill, colorRow, confirmBox, copyText, favicon, h, icon, linkAttrs, loadDash, mailBookmarks,
+  api, attempt, colorRow, confirmBox, copyText, favicon, fill, h, icon, linkAttrs, loadDash, mailBookmarks, offerUndo,
   openModal, promptBox, showMenu, state, toast,
 } from './core.js';
 import { t } from './i18n.js';
@@ -214,7 +214,9 @@ async function deleteTab(tab) {
   const fate = await confirmDelete(t('Delete the tab “{name}” and its categories?', { name: tab.name }), count);
   if (!fate) return;
   activeTabId = null;
-  await act(() => api('DELETE', `/api/tabs/${tab.id}?bookmarks=${fate}`));
+  let res;
+  await act(async () => { res = await api('DELETE', `/api/tabs/${tab.id}?bookmarks=${fate}`); });
+  offerUndo(res);
   invalidateTags();
 }
 
@@ -355,7 +357,9 @@ async function moveCategory(cat, tabs) {
 async function deleteCategory(cat, count) {
   const fate = await confirmDelete(t('Delete the category “{name}”?', { name: cat.name }), count);
   if (!fate) return;
-  await act(() => api('DELETE', `/api/categories/${cat.id}?bookmarks=${fate}`));
+  let res;
+  await act(async () => { res = await api('DELETE', `/api/categories/${cat.id}?bookmarks=${fate}`); });
+  offerUndo(res);
   invalidateTags();
 }
 
@@ -415,7 +419,9 @@ function bookmarkMenu(at, b) {
       label: t('Delete'), danger: true,
       action: async () => {
         if (await confirmBox(t('Delete “{name}”?', { name: b.title }), { okLabel: t('Delete'), danger: true })) {
-          await act(() => api('DELETE', `/api/bookmarks/${b.id}`));
+          let res;
+          await act(async () => { res = await api('DELETE', `/api/bookmarks/${b.id}`); });
+          offerUndo(res);
         }
       },
     },

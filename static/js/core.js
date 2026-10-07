@@ -112,12 +112,29 @@ export async function loadDash() {
   return state.dash;
 }
 
-export function toast(message, kind = '') {
+export function toast(message, kind = '', action = null) {
   let host = document.querySelector('.toasts');
   if (!host) document.body.append((host = h('div', { class: 'toasts', role: 'status' })));
-  const el = h('div', { class: `toast ${kind}` }, message);
+  const el = h('div', { class: `toast ${kind}${action ? ' toast--action' : ''}` }, message, action && h('button', {
+    type: 'button', class: 'toast__action',
+    onclick: () => { el.remove(); action.run(); },
+  }, action.label));
   host.append(el);
-  setTimeout(() => el.remove(), kind === 'error' ? 6000 : 3000);
+  // a toast with a button stays long enough to be read and pressed
+  setTimeout(() => el.remove(), action ? 12000 : kind === 'error' ? 6000 : 3000);
+}
+
+/** After a deletion: say where the bookmarks went and offer to put them back. */
+export function offerUndo(res) {
+  const ids = res?.trash || [];
+  if (!ids.length) return;
+  toast(ids.length === 1 ? t('Moved to the trash') : t('{n} bookmarks moved to the trash', { n: ids.length }), '', {
+    label: t('Undo'),
+    run: () => attempt(async () => {
+      await api('POST', '/api/trash/restore', { ids });
+      toast(t('Restored'));
+    }),
+  });
 }
 
 /**

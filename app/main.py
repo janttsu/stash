@@ -55,6 +55,24 @@ CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src '
        "base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 
 
+TRASH_DAYS = 30
+
+
+def purge_trash(con) -> int:
+    """Remove what has been in the trash longer than TRASH_DAYS."""
+    n = con.execute("DELETE FROM trash WHERE deleted_at < ?", (db.now() - TRASH_DAYS * 86400,)).rowcount
+    con.execute("DELETE FROM trash_place")
+    return n
+
+
+def trash_mark(con, uid: int) -> int:
+    return con.execute("SELECT COALESCE(MAX(id), 0) FROM trash WHERE user_id=?", (uid,)).fetchone()[0]
+
+
+def trashed_since(con, uid: int, mark: int) -> list[int]:
+    return [r[0] for r in con.execute("SELECT id FROM trash WHERE user_id=? AND id>? ORDER BY id", (uid, mark))]
+
+
 MAINTENANCE_ON = os.environ.get("STASH_MAINTENANCE", "on").strip().lower() not in ("off", "0", "false", "no")
 
 
@@ -64,6 +82,7 @@ async def lifespan(app: FastAPI):
     FAVICONS.mkdir(exist_ok=True)
     con = db.connect()
     con.execute("DELETE FROM sessions WHERE expires_at < ?", (db.now(),))
+    purge_trash(con)
     con.close()
     app.state.http = net.make_client()
     task = None
@@ -766,11 +785,12 @@ def catalog_or_delete(c: Ctx, category_ids: list[int], bookmarks: str) -> None:
 @app.delete("/api/tabs/{tab_id}")
 def delete_tab(tab_id: int, bookmarks: Literal["delete", "catalog"] = "delete", c: Ctx = Depends(ctx)):
     own(c.con, "tabs", tab_id, c.uid)
+    mark = trash_mark(c.con, c.uid)
     with db.tx(c.con):
         cats = [r[0] for r in c.con.execute("SELECT id FROM categories WHERE tab_id=?", (tab_id,))]
         catalog_or_delete(c, cats, bookmarks)
         c.con.execute("DELETE FROM tabs WHERE id=?", (tab_id,))
-    return {"ok": True}
+    return {"ok": True, "trash": trashed_since(c.con, c.uid, mark)}
 
 
 class Ids(BaseModel):
@@ -916,10 +936,11 @@ def patch_category(cat_id: int, body: CategoryPatch, c: Ctx = Depends(ctx)):
 @app.delete("/api/categories/{cat_id}")
 def delete_category(cat_id: int, bookmarks: Literal["delete", "catalog"] = "delete", c: Ctx = Depends(ctx)):
     own(c.con, "categories", cat_id, c.uid)
+    mark = trash_mark(c.con, c.uid)
     with db.tx(c.con):
         catalog_or_delete(c, [cat_id], bookmarks)
         c.con.execute("DELETE FROM categories WHERE id=?", (cat_id,))
-    return {"ok": True}
+    return {"ok": True, "trash": trashed_since(c.con, c.uid, mark)}
 
 
 @app.post("/api/categories/{cat_id}/order")
@@ -1017,8 +1038,91 @@ def patch_bookmark(bookmark_id: int, body: BookmarkPatch, c: Ctx = Depends(ctx))
 
 @app.delete("/api/bookmarks/{bookmark_id}")
 def delete_bookmark(bookmark_id: int, c: Ctx = Depends(ctx)):
+    mark = trash_mark(c.con, c.uid)
     c.con.execute("DELETE FROM bookmarks WHERE id=? AND user_id=?", (bookmark_id, c.uid))
-    return {"ok": True}
+    return {"ok": True, "trash": trashed_since(c.con, c.uid, mark)}
+
+
+# --- the trash ---------------------------------------------------------------------------------------
+
+def place_text(tab: Optional[str], cat: Optional[str]) -> str:
+    return f"{tab} / {cat}" if tab and cat else ""
+
+
+@app.get("/api/trash")
+def trash_list(c: Ctx = Depends(ctx)):
+    rows = c.con.execute("SELECT * FROM trash WHERE user_id=? ORDER BY deleted_at DESC, id DESC LIMIT 5000",
+                         (c.uid,)).fetchall()
+    return {"days": TRASH_DAYS, "items": [
+        {"id": r["id"], "title": r["title"], "url": r["url"], "host": r["host"], "tags": json.loads(r["tags"]),
+         "place": place_text(r["tab_name"], r["category_name"]), "deleted_at": r["deleted_at"],
+         "expires_at": r["deleted_at"] + TRASH_DAYS * 86400} for r in rows]}
+
+
+class TrashIds(BaseModel):
+    ids: list[int] = Field(default_factory=list, max_length=5000)
+    all: bool = False
+
+
+def trash_rows(c: Ctx, body: TrashIds) -> list:
+    if body.all:
+        return c.con.execute("SELECT * FROM trash WHERE user_id=? ORDER BY id", (c.uid,)).fetchall()
+    rows = []
+    for part in db.chunks(body.ids):
+        rows += c.con.execute(f"SELECT * FROM trash WHERE user_id=? AND id IN ({db.marks(len(part))}) ORDER BY id",
+                              [c.uid, *part]).fetchall()
+    return rows
+
+
+@app.post("/api/trash/restore")
+def trash_restore(body: TrashIds, c: Ctx = Depends(ctx)):
+    """Bookmarks come back where they were; when that category is gone, to one of the same name (made again if
+    needed), otherwise to the Catalog. An address that is already saved again is not added twice."""
+    con, restored, present, new_ids = c.con, 0, 0, []
+    with db.tx(con):
+        tabs = {r["name"].casefold(): r["id"] for r in con.execute("SELECT id, name FROM tabs WHERE user_id=?", (c.uid,))}
+        for r in trash_rows(c, body):
+            if not con.execute("SELECT 1 FROM trash WHERE id=?", (r["id"],)).fetchone():
+                continue  # an earlier one in this batch had the same address
+            if con.execute("SELECT 1 FROM bookmarks WHERE user_id=? AND url=?", (c.uid, r["url"])).fetchone():
+                con.execute("DELETE FROM trash WHERE id=?", (r["id"],))
+                present += 1
+                continue
+            if bookmark_count(con, c.uid) >= MAX_BOOKMARKS:
+                raise err(422, "limit_reached")
+            cat = r["category_id"] if r["category_id"] is not None and con.execute(
+                "SELECT 1 FROM categories WHERE id=? AND user_id=?", (r["category_id"], c.uid)).fetchone() else None
+            if cat is None and r["tab_name"] and r["category_name"]:
+                tab_id = tabs.get(r["tab_name"].casefold())
+                if tab_id is None:
+                    tab_id = tabs[r["tab_name"].casefold()] = new_tab(con, c.uid, r["tab_name"])
+                found = con.execute("SELECT id FROM categories WHERE tab_id=? AND lower(name)=lower(?)",
+                                    (tab_id, r["category_name"])).fetchone()
+                cat = found[0] if found else new_category(con, c.uid, tab_id, r["category_name"])
+            values = (c.uid, cat, r["title"], r["url"], r["host"], r["notes"], r["color"], next_position(con, cat),
+                      r["created_at"], db.now())
+            if con.execute("SELECT 1 FROM bookmarks WHERE id=?", (r["bookmark_id"],)).fetchone():
+                bid = con.execute("INSERT INTO bookmarks(user_id, category_id, title, url, host, notes, color, position,"
+                                  " created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", values).lastrowid
+            else:  # the old id is free: links to it (shares, history) keep working
+                bid = con.execute("INSERT INTO bookmarks(id, user_id, category_id, title, url, host, notes, color,"
+                                  " position, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                  (r["bookmark_id"], *values)).lastrowid
+            add_tags(con, [bid], norm_tags(json.loads(r["tags"])))
+            new_ids.append(bid)
+            restored += 1
+        db.reindex(con, new_ids)
+    return {"restored": restored, "already_there": present, "ids": new_ids}
+
+
+@app.post("/api/trash/delete")
+def trash_delete(body: TrashIds, c: Ctx = Depends(ctx)):
+    """Delete for good: the given items, or everything with all=true."""
+    with db.tx(c.con):
+        ids = [r["id"] for r in trash_rows(c, body)]
+        for part in db.chunks(ids):
+            c.con.execute(f"DELETE FROM trash WHERE id IN ({db.marks(len(part))})", part)
+    return {"deleted": len(ids)}
 
 
 SORTS = {
@@ -1094,7 +1198,7 @@ class Bulk(BaseModel):
 
 @app.post("/api/bookmarks/bulk")
 def bulk(body: Bulk, c: Ctx = Depends(ctx)):
-    con = c.con
+    con, trash = c.con, []
     with db.tx(con):
         if body.filter is not None:
             where, params = filter_sql(c.uid, body.filter)
@@ -1106,8 +1210,10 @@ def bulk(body: Bulk, c: Ctx = Depends(ctx)):
                     f"SELECT id FROM bookmarks WHERE user_id=? AND id IN ({db.marks(len(part))})", [c.uid, *part])}
                 ids += [i for i in part if i in found]
         if body.action == "delete":
+            mark = trash_mark(con, c.uid)
             for part in db.chunks(ids):
                 con.execute(f"DELETE FROM bookmarks WHERE id IN ({db.marks(len(part))})", part)
+            trash = trashed_since(con, c.uid, mark)
         elif body.action == "move":
             if body.category_id is not None:
                 own(con, "categories", body.category_id, c.uid)
@@ -1128,7 +1234,7 @@ def bulk(body: Bulk, c: Ctx = Depends(ctx)):
                 if new != old:
                     remove_tags(con, ids, [old])
             db.reindex(con, ids)
-    return {"count": len(ids)}
+    return {"count": len(ids), "trash": trash}
 
 
 class TagRename(BaseModel):

@@ -23,6 +23,9 @@ without handing it to anyone.
    - **Catalog**: a tagged store with fast search.
    - Import and export as a browser bookmarks file, sharing a tab by link, finding duplicates and dead links,
      a bookmarklet, a browser extension, two-factor authentication and invitation-based registration.
+   - **Trash.** Deleted bookmarks wait 30 days in the trash (account menu → Trash), whichever way they were
+     deleted: one at a time, many at once, with a whole category or tab, or through an API key. Every deletion
+     shows an Undo button, and restoring puts a bookmark back where it was, making its category again if needed.
    - **Always current.** An open page redraws itself when the bookmarks change anywhere: in another tab or
      device, through an API key or MCP client, or in the background upkeep. It waits while you are typing, dragging
      or have a dialog open.

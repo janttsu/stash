@@ -5,6 +5,7 @@ import { api, applyTheme, attempt, fill, h, icon, showMenu, state } from './core
 import { refresh as refreshDashboard, renderDashboard } from './dashboard.js';
 import { setLang, t } from './i18n.js';
 import { renderSettings } from './settings.js';
+import { renderTrash } from './trash.js';
 import { bookmarkDialog } from './widgets.js';
 
 const app = document.getElementById('app');
@@ -79,6 +80,7 @@ function shell() {
         type: 'button', class: 'btn top__user', 'aria-label': t('Account'),
         onclick: (e) => showMenu(e.currentTarget, [
           { heading: state.user.username },
+          { label: t('Trash'), action: () => { location.hash = '#/trash'; } },
           { label: t('Settings'), action: () => { location.hash = '#/settings'; } },
           { label: t('Sign out'), action: () => attempt(async () => { await api('POST', '/api/logout'); location.href = '/'; }) },
         ]),
@@ -91,7 +93,8 @@ async function route() {
   const [path, query] = location.hash.replace(/^#/, '').split('?');
   const params = Object.fromEntries(new URLSearchParams(query || ''));
   const view = document.getElementById('view');
-  const name = path === '/bookmarks' ? 'bookmarks' : path === '/settings' ? 'settings' : 'dashboard';
+  const name = path === '/bookmarks' ? 'bookmarks' : path === '/settings' ? 'settings'
+    : path === '/trash' ? 'trash' : 'dashboard';
   if (current === 'bookmarks' && name !== 'bookmarks') leaveBookmarks();
   current = name;
   for (const link of document.querySelectorAll('.top__link')) {
@@ -100,6 +103,7 @@ async function route() {
   await attempt(async () => {
     if (name === 'bookmarks') await renderBookmarks(view, params);
     else if (name === 'settings') await renderSettings(view);
+    else if (name === 'trash') await renderTrash(view);
     else await renderDashboard(view, params.tab ? { tab: Number(params.tab) } : null);
   });
 }
