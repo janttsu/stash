@@ -299,16 +299,26 @@ try {
   await js(HELPERS);
   await until(`document.querySelectorAll('.settings .card').length === 9 && !!$t('.settings h2', 'Users and registration')`, 'nine settings cards incl. admin');
   // API key: created in a dialog, shown once, listed by its prefix, then revoked
-  await js(`$click('.settings .btn', 'Create API key')`);
-  await waitFor('dialog[open] input');
-  await js(`$fill('dialog[open] input[type=text]', 'desktop'); $click('dialog[open] .btn', 'Create')`);
-  await until(`!!document.querySelector('dialog[open] input.mono') && document.querySelector('dialog[open] input.mono').value.startsWith('stash_')`, 'the new key is shown');
-  const apiKey = await js(`return document.querySelector('dialog[open] input.mono').value`);
-  await shot('12b-api-key');
-  await js(`$click('dialog[open] .btn', 'Close')`);
-  await until(`!!$t('.settings td', 'desktop') && !!$t('.settings td', 'Read and change')`, 'key listed');
+  // the assistant (MCP) card: instructions, the address, and connecting an assistant makes a key with a ready setup
+  check(await js(`return !!$t('.settings h3', 'How to use it') && document.querySelectorAll('.settings .steps li').length === 4`), 'MCP instructions');
+  check(await js(`return [...document.querySelectorAll('.settings input.mono')].some((i) => i.value === location.origin + '/mcp')`), 'MCP address shown');
+  await js(`$t('.settings h2', 'Assistant (MCP)').scrollIntoView()`);
+  await shot('12a-mcp-card');
+  await js(`$click('.settings .btn', 'Connect an assistant')`);
+  await waitFor('dialog[open] select');
+  await js(`const s = document.querySelector('dialog[open] select'); s.value = 'claude'; s.dispatchEvent(new Event('change')); $fill('dialog[open] input[type=text]', 'desktop'); $click('dialog[open] .btn', 'Create key')`);
+  await until(`!!document.querySelector('dialog[open] textarea.mono') && document.querySelector('dialog[open] textarea.mono').value.includes('Bearer stash_')`, 'the ready setup with the new key is shown');
+  const setup = await js(`return document.querySelector('dialog[open] textarea.mono').value`);
+  check(setup.startsWith('claude mcp add --transport http stash ') && setup.includes('/mcp --header'), 'Claude Code command');
+  const apiKey = setup.match(/Bearer (stash_[A-Za-z0-9_-]+)/)[1];
+  await shot('12b-mcp-setup');
+  await js(`$click('dialog[open] .btn', 'Done')`);
+  await until(`!!$t('.settings td', 'desktop')`, 'key listed');
+  const mcp = await fetch(`${BASE}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) });
+  check(mcp.ok && (await mcp.json()).result.tools.some((t) => t.name === 'preview_changes'), 'the key works on /mcp');
   const me = await (await fetch(`${BASE}/api/v1/me`, { headers: { Authorization: `Bearer ${apiKey}` } })).json();
-  check(me.can_write === true && me.key === 'desktop', 'the key works on /api/v1');
+  check(me.can_write === true && me.key === 'desktop', 'the same key works on /api/v1');
   const change = await (await fetch(`${BASE}/api/v1/changes`, {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ summary: 'api test', ops: [{ op: 'create', url: 'https://api.example/', title: 'From the API', tags: ['api'] }] }),
@@ -322,10 +332,12 @@ try {
   await waitFor('dialog[open]');
   await js(`$click('dialog[open] .btn', 'Undo')`);
   await until(`!!$t('.settings .muted', 'Undone')`, 'change undone');
+  // the undo redraws Settings (live update), so wait for the key list to be back
+  await until(`!!$t('.settings .btn.danger', 'Revoke')`, 'key list redrawn');
   await js(`$click('.settings .btn.danger', 'Revoke')`);
   await waitFor('dialog[open]');
   await js(`$click('dialog[open] .btn', 'Revoke')`);
-  await until(`!!$t('.settings .muted', 'No API keys yet.')`, 'key revoked');
+  await until(`!!$t('.settings .muted', 'No keys yet.')`, 'key revoked');
   check((await fetch(`${BASE}/api/v1/me`, { headers: { Authorization: `Bearer ${apiKey}` } })).status === 401, 'revoked key stops working');
   check(await js(`return document.querySelector('.bookmarklet').getAttribute('href').startsWith('javascript:')`), 'bookmarklet link');
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 2600, deviceScaleFactor: 1, mobile: false });

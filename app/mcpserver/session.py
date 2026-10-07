@@ -1,6 +1,6 @@
-"""One MCP session's state and tools: bookmarks held in memory, named result sets, and previewed changes.
+"""One API key's MCP state and tools: bookmarks held in memory, named result sets, and previewed changes.
 
-The safety model of the old stashai agent stays the same, only the model now lives in the MCP client:
+The model lives in the MCP client; Stash keeps it safe:
 
 - **Sets by name.** Every search makes a set (S1, S2, …) and changes refer to it by name. The program expands
   names into ids itself, so the model cannot lose or invent bookmarks.
@@ -16,10 +16,10 @@ import threading
 import time
 from dataclasses import dataclass
 
-from stashai.api import StashAPI, StashError
-from stashai.render import plan_text
-from stashai.store import Store
-from stashai.web import Web, page_title, unnamed_title
+from .local import LocalAPI, StashError
+from .render import plan_text
+from .store import Store
+from .web import Web, page_title, unnamed_title
 
 SET_OPS = {"add_tags", "remove_tags", "set_tags", "delete", "move"}
 ALL_OPS = SET_OPS | {"rename_tag", "update", "create", "update_urls", "update_titles", "tag_each",
@@ -55,7 +55,7 @@ def fingerprint(result: dict) -> str:
 
 
 class Session:
-    def __init__(self, api: StashAPI, web: Web | None = None, *, store: Store | None = None):
+    def __init__(self, api: LocalAPI, web: Web | None = None, *, store: Store | None = None):
         self.api, self.web = api, web
         self.store = store or Store()
         self.loaded = 0.0
@@ -91,7 +91,9 @@ class Session:
         history = ("Browsing history: " + "; ".join(f"{s['source']} ({s['items']} addresses)"
                                                     for s in self.store.history_sources)
                    if self.store.history_sources else "Browsing history: none sent yet")
-        return f"{self.store.overview()}\n{history}\n\nSets of this session:\n{self.store.sets_text()}"
+        rules = self.api.rules()
+        rules = f"\n\nTHE USER'S STANDING RULES (follow them in every change):\n{rules}" if rules else ""
+        return f"{self.store.overview()}\n{history}{rules}\n\nSets of this session:\n{self.store.sets_text()}"
 
     def search(self, label: str = "", **spec) -> str:
         self.ensure()
@@ -146,11 +148,11 @@ class Session:
             lines.append(f"… {data['total'] - len(data['items'])} more (raise min_visits or limit)")
         return "\n".join(lines)
 
-    # --- the web (read from this computer) ----------------------------------------------
+    # --- the web (read from the Stash server) ----------------------------------------
 
     def need_web(self) -> Web:
         if self.web is None:
-            raise ValueError("web access is turned off in the stashai config ([web] enabled = false)")
+            raise ValueError("reading web pages is turned off on this Stash server")
         return self.web
 
     def read_page(self, url: str = "", bookmark_id: int | None = None, max_chars: int = 3000) -> str:
@@ -206,7 +208,7 @@ class Session:
         return "\n".join(out)
 
     def refresh_titles(self, set_name: str = "", ids=None, only_bad: bool = False, summary: str = "") -> str:
-        """Read titles from this computer and preview the changes right away."""
+        """Read titles from the pages and preview the changes right away."""
         web = self.need_web()
         self.ensure()
         chosen = [i for i in self.ids_of(set_name, ids) if self.store.bookmarks[i].url.startswith(("http://", "https://"))]

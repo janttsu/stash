@@ -54,7 +54,7 @@ function behaviour() {
     checkField(t('Auto-tag when moving to the Catalog'), 'auto_tag_catalog',
       t('The tab and category names are added as tags, so the bookmark stays easy to find.')),
     checkField(t('Keep bookmarks tidy automatically'), 'auto_maintain',
-      t('Stash checks now and then by itself: missing titles get the real page title, site icons are fetched again, pages that are gone get the dead-link tag, and extra copies of the same address get the duplicate tag. The tags clear on their own when no longer needed.')));
+      t('Stash checks now and then by itself: missing titles get the real page title, and site icons are fetched again.')));
 }
 
 function addButtons() {
@@ -97,21 +97,51 @@ function importExport() {
 
 function apiKeys() {
   const card = h('section', { class: 'card' });
+  const url = `${location.origin}/mcp`;
   const draw = async () => {
-    const [data, client] = await Promise.all([attempt(() => api('GET', '/api/keys')), attempt(() => api('GET', '/api/client'))]);
+    const data = await attempt(() => api('GET', '/api/keys'));
     if (!data) return;
-    const install = client?.wheel ? `pipx install --force ${client.wheel}` : '';
+    const rules = h('textarea', {
+      class: 'input', rows: 4, maxLength: 6000, value: state.user.settings.assistant_rules || '',
+      placeholder: t('For example: recipes always get the tag food. Never delete anything on the tab “Start”.'),
+    });
     fill(card,
-      h('h2', null, t('API keys')),
-      h('p', null, t('With an API key, programs on your other computers can read and change your bookmarks through the address {url}. Each key is shown only once; store it like a password.', { url: `${location.origin}/api/v1` })),
+      h('h2', null, t('Assistant (MCP)')),
+      h('p', null, t('Connect Stash to an AI assistant such as Claude Code, Qwen Code or Gemini CLI, and ask in your own words: “move everything about company X to the tag Y”, “which links are dead?”. The assistant shows exactly what would change and changes nothing until you agree. Every change can be undone below.')),
+      h('div', { class: 'field' }, h('span', null, t('Address for MCP clients')), h('div', { class: 'row' },
+        h('input', { type: 'text', class: 'input mono', readOnly: true, value: url, onfocus: (e) => e.target.select() }),
+        h('button', { type: 'button', class: 'btn', onclick: () => copyText(url) }, t('Copy')))),
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'btn primary', onclick: () => connectAssistant(draw) }, t('Connect an assistant'))),
+      h('h3', null, t('How to use it')),
+      h('ol', { class: 'steps' },
+        h('li', null, t('Press “Connect an assistant”, choose the assistant you use and copy the text Stash shows. It contains a new key, so copy it before closing the window.')),
+        h('li', null, t('Claude Code: run the copied command in a terminal. Qwen Code and Gemini CLI: add the copied lines to the settings file named in the window. Then start the assistant again.')),
+        h('li', null, t('Ask in your own words. The assistant starts by looking at your tabs, categories and tags, then finds the bookmarks the request is about.')),
+        h('li', null, t('Before anything changes, the assistant shows exactly what would change. Say yes to apply it. Changed your mind afterwards? Ask it to undo the last change, or undo it below under “Changes made with API keys”. Deleted bookmarks also wait 30 days in the trash.'))),
+      h('p', { class: 'muted' }, t('Things to ask:')),
+      h('ul', { class: 'examples' },
+        h('li', null, t('“Which bookmarks about health have no tags? Suggest tags for them.”')),
+        h('li', null, t('“Check whether the links on the Hobbies tab still work and remove the dead ones.”')),
+        h('li', null, t('“Fix the titles of the bookmarks that only show an address.”')),
+        h('li', null, t('“Move everything about my bank and insurance to the category Important on the Home tab.”'))),
+      h('p', { class: 'muted small' }, t('Tip: give each assistant its own key, and let your assistant ask for permission before it uses the tool apply_changes. If a key gets lost, revoke it here.')),
+      h('h3', null, t('Keys')),
+      h('p', { class: 'muted' }, t('Each assistant or program gets its own key. Revoke a key and it stops working at once.')),
       data.keys.length ? h('div', { class: 'tablewrap' }, h('table', { class: 'table' },
-        h('thead', null, h('tr', null, [t('Name'), t('Key'), t('Access'), t('Created'), t('Last used'), ''].map((x) => h('th', null, x)))),
+        h('thead', null, h('tr', null, [t('Name'), t('Key'), t('Allow changes'), t('Created'), t('Last used'), ''].map((x) => h('th', null, x)))),
         h('tbody', null, data.keys.map((k) => h('tr', null,
           h('td', null, k.name),
           h('td', null, h('code', null, `${k.prefix}…`)),
-          h('td', null, k.can_write ? t('Read and change') : t('Read only')),
+          h('td', null, h('input', {
+            type: 'checkbox', checked: k.can_write, 'aria-label': t('Allow changes'),
+            onchange: (e) => attempt(async () => {
+              await api('PATCH', `/api/keys/${k.id}`, { can_write: e.target.checked });
+              toast(e.target.checked ? t('The key can now change bookmarks') : t('The key can now only read'));
+            }),
+          })),
           h('td', null, fmtDate(k.created_at)),
-          h('td', null, k.last_used ? `${fmtDate(k.last_used)} (${k.last_ip})` : '–'),
+          h('td', null, k.last_used ? fmtDate(k.last_used) : t('never')),
           h('td', null, h('button', {
             type: 'button', class: 'btn small danger',
             onclick: async () => {
@@ -119,37 +149,56 @@ function apiKeys() {
               await attempt(async () => { await api('DELETE', `/api/keys/${k.id}`); await draw(); });
             },
           }, t('Revoke'))))))))
-        : h('p', { class: 'muted' }, t('No API keys yet.')),
-      h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => createKey(draw) }, t('Create API key'))),
-      h('h3', null, t('stashai: your bookmarks in AI assistants (MCP)')),
-      h('p', null, t('stashai connects Stash to Qwen Code, Claude Code, Gemini CLI and other MCP clients. You write what you want (“move everything about company X to tag Y”, “list everything about Z”), the assistant finds the bookmarks, shows exactly what would change and changes them only when you agree. Every change can be undone below.')),
-      install ? h('div', { class: 'row' },
-        h('input', { type: 'text', class: 'input mono', readOnly: true, value: install, onfocus: (e) => e.target.select() }),
-        h('button', { type: 'button', class: 'btn', onclick: () => copyText(install) }, t('Copy'))) : null,
-      h('p', { class: 'muted' }, t('Then run “stashai login {url}”, paste a key that can read and change, and add “stashai mcp” to your MCP client: “stashai doctor” prints the settings.', { url: location.origin })),
-      h('p', { class: 'muted' }, t('The same command also replaces an older version. Versions 0.1.1 and newer update themselves with “stashai update”.')));
+        : h('p', { class: 'muted' }, t('No keys yet.')),
+      h('h3', null, t('Your rules for the assistant')),
+      h('p', { class: 'muted' }, t('Standing instructions in your own words. The assistant reads them before every change.')),
+      rules,
+      h('div', { class: 'row' }, h('button', {
+        type: 'button', class: 'btn',
+        onclick: () => save({ assistant_rules: rules.value }),
+      }, t('Save rules'))),
+      h('p', { class: 'muted small' }, t('Programs of your own can use the same keys with the API at {url}.', { url: `${location.origin}/api/v1` })));
   };
   draw();
   return card;
 }
 
-async function createKey(redraw) {
-  const name = h('input', { type: 'text', class: 'input', required: true, maxLength: 100, placeholder: t('e.g. desktop') });
+const CLIENTS = {
+  claude: { name: 'Claude Code', how: (url, key) => [t('Run this in a terminal:'), `claude mcp add --transport http stash ${url} --header "Authorization: Bearer ${key}"`] },
+  qwen: { name: 'Qwen Code', how: (url, key) => [t('Add this to {file}:', { file: '~/.qwen/settings.json' }), mcpJson(url, key)] },
+  gemini: { name: 'Gemini CLI', how: (url, key) => [t('Add this to {file}:', { file: '~/.gemini/settings.json' }), mcpJson(url, key)] },
+  other: { name: t('Other'), how: (url, key) => [t('Use the address and send the key in the Authorization header:'), `${url}\nAuthorization: Bearer ${key}`] },
+};
+
+function mcpJson(url, key) {
+  return JSON.stringify({ mcpServers: { stash: { httpUrl: url, headers: { Authorization: `Bearer ${key}` } } } }, null, 2);
+}
+
+async function connectAssistant(redraw) {
+  const client = h('select', { class: 'input' }, Object.entries(CLIENTS).map(([id, c]) => h('option', { value: id }, c.name)));
+  const name = h('input', { type: 'text', class: 'input', required: true, maxLength: 100, value: CLIENTS.claude.name });
+  client.addEventListener('change', () => { name.value = CLIENTS[client.value].name; });
   const write = h('input', { type: 'checkbox', checked: true });
-  const created = await openModal(t('Create API key'), h('div', { class: 'form' },
-    h('label', { class: 'field' }, h('span', null, t('Name')), name),
+  const created = await openModal(t('Connect an assistant'), h('div', { class: 'form' },
+    h('label', { class: 'field' }, h('span', null, t('Assistant')), client),
+    h('label', { class: 'field' }, h('span', null, t('Name of the key')), name),
     h('label', { class: 'check' }, write, h('span', null, t('Allow changes'),
-      h('small', { class: 'muted block' }, t('Without this the key can only read. Previews of changes work with both.'))))), [
+      h('small', { class: 'muted block' }, t('Without this the assistant can only look. It always asks before it changes anything.'))))), [
     { label: t('Cancel') },
-    { label: t('Create'), kind: 'primary', action: () => api('POST', '/api/keys', { name: name.value, can_write: write.checked }) },
+    { label: t('Create key'), kind: 'primary', action: () => api('POST', '/api/keys', { name: name.value, can_write: write.checked }) },
   ]);
   if (!created) return;
   await redraw();
-  await openModal(t('New API key'), h('div', { class: 'form' },
-    h('p', null, t('Copy the key now. It is shown only once.')),
-    h('input', { type: 'text', class: 'input mono', readOnly: true, value: created.key, onfocus: (e) => e.target.select() })), [
-    { label: t('Copy'), action: async () => { await copyText(created.key); return false; } },
-    { label: t('Close'), kind: 'primary', action: () => true },
+  const [how, setup] = CLIENTS[client.value].how(`${location.origin}/mcp`, created.key);
+  await openModal(t('Connect {name}', { name: CLIENTS[client.value].name }), h('div', { class: 'form' },
+    h('p', null, how),
+    h('textarea', {
+      class: 'input mono setup', readOnly: true, value: setup, onfocus: (e) => e.target.select(),
+      rows: Math.min(14, Math.max(setup.split('\n').length, Math.ceil(setup.length / 46)) + 1),
+    }),
+    h('p', { class: 'muted small' }, t('The key is part of this text and is shown only once. Keep it like a password.'))), [
+    { label: t('Copy'), action: async () => { await copyText(setup); return false; } },
+    { label: t('Done'), kind: 'primary', action: () => true },
   ]);
 }
 
@@ -208,7 +257,7 @@ function browsingHistory() {
     if (!data) return;
     fill(card,
       h('h2', null, t('Browsing history')),
-      h('p', null, t('Your computers can send their Firefox history here. stashai then sees which bookmarks you really use: it can bring the most used ones to the Dashboard, put them first, and find often visited pages that are not bookmarked yet. The history stays on this server, is never part of the export and can be deleted here at any time.')),
+      h('p', null, t('Your computers can send their Firefox history here. Your assistant (MCP) then sees which bookmarks you really use: it can bring the most used ones to the Dashboard, put them first, and find often visited pages that are not bookmarked yet. The history stays on this server, is never part of the export and can be deleted here at any time.')),
       data.sources.length ? h('div', { class: 'tablewrap' }, h('table', { class: 'table' },
         h('thead', null, h('tr', null, [t('Computer'), t('Browser'), t('Addresses'), t('Last sync'), ''].map((x) => h('th', null, x)))),
         h('tbody', null, data.sources.map((s) => h('tr', null,

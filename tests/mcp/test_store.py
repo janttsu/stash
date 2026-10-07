@@ -1,7 +1,7 @@
 import pytest
 from conftest import ids_by_title
 
-from stashai.store import short_url
+from app.mcpserver.store import short_url
 
 
 def titles(store, ids):

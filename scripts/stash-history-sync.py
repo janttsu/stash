@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send your Firefox browsing history to Stash, so stashai can tell which bookmarks you really use.
+"""Send your Firefox browsing history to Stash, so your assistant (MCP) can tell which bookmarks you really use.
 
 Works on macOS and Linux with the Python 3 that comes with the system (3.8+), no extra packages.
 

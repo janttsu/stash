@@ -29,19 +29,18 @@ without handing it to anyone.
    - **Always current.** An open page redraws itself when the bookmarks change anywhere: in another tab or
      device, through an API key or MCP client, or in the background upkeep. It waits while you are typing, dragging
      or have a dialog open.
-   - **Keeps itself tidy.** In the background Stash slowly re-checks bookmarks on its own, so you rarely have to
-     run the duplicate or dead-link tools by hand (see *Background upkeep* below). Each account can switch this
-     off in Settings.
+   - **Keeps titles and icons up to date.** In the background Stash gives unnamed bookmarks their page's real
+     title and fetches site icons again (see *Background upkeep* below). Each account can switch this off.
    - The web UI and the browser extension speak **English, Finnish and Swedish** (Settings → Language, or the
      browser's language).
    - **API** (`/api/v1`) with API keys: all bookmarks at once, search, and changes with exact previews.
      Every change can be undone.
-2. **stashai** (`client/`): an **MCP server** (`stashai mcp`) for Qwen Code, Claude Code, Gemini CLI and
-   other MCP clients, plus terminal helpers. You give the client instructions in plain language ("move
-   everything about company X to tag Y", "check whether these links still work"); its model studies the
-   bookmarks with stashai's tools, can read web pages and your browsing history, and previews every change as
-   an exact dry run. Nothing changes until you agree to the preview, and everything can be undone.
-   See [`client/README.md`](client/README.md) for installing it and connecting a client.
+2. **An MCP endpoint** (`/mcp`, in `app/mcpserver/`) for AI assistants such as Claude Code, Qwen Code and
+   Gemini CLI. You ask in plain language ("move everything about company X to tag Y", "check whether these
+   links still work"); the assistant studies the bookmarks with Stash's tools, can read web pages and your
+   browsing history, and previews every change as an exact dry run. Nothing changes until you agree to the
+   preview, and everything can be undone. Nothing has to be installed: the assistant connects to your Stash
+   with an API key (see *Using Stash from an AI assistant* below).
 3. **Browsing history sync** (`scripts/stash-history-sync.py`): a small script (macOS and Linux, plain
    Python 3) that sends Firefox's visit counts to Stash every few hours. Then the assistant knows which bookmarks you
    really use: it can bring the most used ones to the Dashboard, order bookmarks and categories by use, find
@@ -61,7 +60,7 @@ without handing it to anyone.
 | `app/api_v1.py` | `/api/v1` for API keys, plus managing keys and the change history |
 | `app/history.py` | Browsing history sent by devices: upload, visit counts for bookmarks, search |
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
-| `client/` | stashai: the MCP server and terminal helpers (its own Python package) |
+| `app/mcpserver/` | The MCP endpoint `/mcp`: its tools, named result sets, previews and page reading |
 | `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
 | `static/` | The web UI: native ES modules, no build step |
 | `extension/` | Browser extension (downloadable from the app at `/extension.zip`) |
@@ -106,32 +105,64 @@ Environment variables: `STASH_ORIGIN` (public address), `STASH_DATA` (data direc
 
 ## Using Stash from an AI assistant (MCP)
 
-stashai turns Stash into an MCP server, so Qwen Code, Claude Code, Gemini CLI or any other MCP client can
-search, tidy and fix your bookmarks in plain language. On the computer where the client runs:
+Stash is an MCP server at `https://<your stash>/mcp` (streamable HTTP). An assistant such as Claude Code, Qwen
+Code or Gemini CLI connects to it with an API key and can then search, tidy and fix your bookmarks in plain
+language. Nothing is installed on your computer.
+
+The easy way is Settings → Assistant (MCP) → **Connect an assistant**: choose your assistant, and Stash creates a
+key and shows the finished setup with the key in it. The same card explains how to use it, lists your keys with
+their last use, lets you switch a key between read-only and read-and-change, revoke it, and write standing rules
+for the assistant ("recipes always have the tag food").
+
+The setups it shows, with your own address and key:
 
 ```sh
-pipx install --force https://stash.example.com/dl/stashai-<version>-py3-none-any.whl   # Settings → API keys shows the exact command
-stashai login https://stash.example.com      # paste an API key with "Allow changes"
-stashai doctor                                # checks the connection and prints the client settings
+# Claude Code
+claude mcp add --transport http stash https://stash.example.com/mcp --header "Authorization: Bearer stash_…"
 ```
-
-Then register the server with your client. Qwen Code and Gemini CLI read it from `~/.qwen/settings.json` or
-`~/.gemini/settings.json`:
 
 ```json
-{ "mcpServers": { "stash": { "command": "stashai", "args": ["mcp"] } } }
+// Qwen Code (~/.qwen/settings.json) and Gemini CLI (~/.gemini/settings.json)
+{ "mcpServers": { "stash": { "httpUrl": "https://stash.example.com/mcp",
+                             "headers": { "Authorization": "Bearer stash_…" } } } }
 ```
 
-Claude Code: `claude mcp add stash -- stashai mcp`. Now ask, for example "which bookmarks about Python have no
-tags? suggest tags for them". The model finds bookmarks as named sets, every change is first shown as an exact
-dry-run preview, and only `apply_changes` with that preview's id changes anything; it is refused if the
-bookmarks changed after the preview. Every applied change can be undone. Keep `apply_changes` behind the
-client's confirmation prompt. The full tool list and options are in [`client/README.md`](client/README.md).
+Then ask, for example "which bookmarks about Python have no tags? suggest tags for them".
 
-## The API and stashai
+| Tool | What it does |
+| --- | --- |
+| `overview` | tags with counts, tabs and categories, the size of the collection, your rules, the sets made so far |
+| `search` | finds bookmarks by words, regex, site, tags, tab, category, dates or use, and keeps them as a set (S1, S2, …) |
+| `show`, `combine` | list a set; union, intersection or difference of two sets |
+| `browsing_history` | visited addresses from your synced Firefox history, also those not bookmarked |
+| `read_page` | reads one page as text |
+| `check_links` | checks every link of a set: alive, moved, dead, unclear |
+| `refresh_titles` | reads the pages' real titles and previews giving them to the bookmarks |
+| `refresh_icons` | fetches the site icons again (a server cache, done at once) |
+| `preview_changes` | runs changes as a dry run and returns the exact diff with a preview id (P1, P2, …) |
+| `apply_changes` | applies a preview you agreed to |
+| `recent_changes`, `undo` | the latest changes and taking one back |
+
+How it stays safe:
+
+- **Sets by name, not lists of ids.** Every search makes a set and changes refer to it by name. Stash expands
+  names into ids itself, so the model cannot lose or invent bookmarks, and long lists never pass through it.
+- **Preview, then apply.** `preview_changes` is an exact dry run. `apply_changes` only takes a preview id and
+  runs the dry run once more first: if the bookmarks changed after the preview, nothing is applied. Keep
+  `apply_changes` behind your assistant's confirmation prompt.
+- **Undoable.** Every applied preview is one changeset (Settings → Changes made with API keys), and deleted
+  bookmarks also wait 30 days in the trash.
+- **Keys.** Each request needs an API key; a read-only key can look and preview but not apply. A key revoked in
+  Settings stops working at once. The endpoint answers only for this server's own address.
+- **Untrusted pages.** Page text and titles are data, never instructions. Pages are fetched by the server, never
+  from its own addresses or private networks. A site that refuses the server's location cannot be read.
+
+A key's sets and previews are kept in memory for an hour after its last use, so a conversation can build on them.
+
+## The API
 
 Other computers and programs use Stash at `/api/v1` with an API key (`Authorization: Bearer stash_…`).
-Keys are created in Settings → API keys; only a hash of the key is stored. A key can only read unless it is
+Keys are created in Settings → Assistant (MCP); only a hash of the key is stored. A key can only read unless it is
 allowed to make changes. `/api/v1` never accepts the session cookie, so it needs no CSRF header.
 
 | Call | What it does |
@@ -164,29 +195,18 @@ show a new icon at once instead of keeping their week-long cached copy.
 
 ## Background upkeep
 
-Stash keeps bookmarks in order on its own, so you seldom need the duplicate or dead-link tools by hand. A slow
-loop inside the server works through a small batch every few minutes:
+A slow loop inside the server works through a small batch every few minutes. A bookmark whose title is empty or
+just its own address is given the page's real title, and site icons are fetched again. A title you have written
+is left untouched, and a page the server cannot reach keeps whatever title it already has. The loop also empties
+the trash of what has been there longer than 30 days.
 
-- **Dead links.** A page that answers 404/410, or whose domain no longer resolves, is re-checked over several
-  rounds; once it has failed a few times in a row it gets the `dead-link` tag, and the tag is removed again as
-  soon as the page answers normally. A link that only times out, or is behind a login, is never tagged, so the
-  mark stays trustworthy. The dead state is stored per bookmark.
-- **Duplicates.** When two bookmarks share the same address, every copy after the oldest keeps the `duplicate`
-  tag. The tag is kept in step with the bookmarks and clears by itself once the extra copies are gone.
-- **Titles and icons.** A bookmark whose title is empty or just its own address is given the page's real title,
-  and site icons are fetched again. A title you have written is left untouched, and a page the server cannot
-  reach from where it runs keeps whatever title it already has.
-
-These edits are made directly (like the manual tools), so they do not fill the undo history. Each account can
-turn the whole thing off in Settings → Bookmarks, and `STASH_MAINTENANCE=off` disables it for the whole server.
+These edits are made directly, so they do not fill the undo history. Each account can turn this off in
+Settings → Bookmarks, and `STASH_MAINTENANCE=off` disables it for the whole server. Duplicates and dead links are
+found when you ask: My Bookmarks → Tools, or your assistant.
 
 Browsing history is matched to bookmarks loosely (http/https, `www.` and a trailing slash do not matter). Each
 device sends visit counts per address (last 30, 90 and 365 days, and all), and a new sync replaces that
 device's earlier rows.
-
-`client/` is **stashai** (see [`client/README.md`](client/README.md)). The package is built with
-`client/.venv/bin/pip wheel --no-deps -w client/dist client/`, and Stash serves it at
-`/dl/stashai-<version>-py3-none-any.whl` (Settings shows the current `pipx install` command).
 
 Sending the history from the Mac (or Linux computer) where Firefox is used:
 
@@ -203,7 +223,9 @@ python3 ~/stash-history-sync.py --schedule    # sends every 6 hours (launchd / c
 .venv/bin/python tests/smoke.py    # the web API end to end, throwaway database
 .venv/bin/python tests/api_v1.py   # API keys, /api/v1, previews and undo
 .venv/bin/python tests/history.py  # the sync script against a fake Firefox profile, the history API, ordering
-client/.venv/bin/python -m pytest -q client/tests   # stashai: search, sets, previews, web, MCP tools
+.venv/bin/python tests/trash.py    # the trash: every way of deleting, restoring, the 30-day limit
+.venv/bin/python tests/maintenance.py  # the background upkeep of titles and icons
+.venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end (pip install pytest)
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
 node tools/check-i18n.mjs          # missing or broken Finnish and Swedish translations
 node tools/screenshots.mjs         # the README screenshots, from a demo instance on port 8014
@@ -214,7 +236,7 @@ node tools/screenshots.mjs         # the README screenshots, from a demo instanc
 UI strings are written in English in the code (`t('…')`); `static/js/i18n.js` maps them to Finnish and
 `static/js/i18n-sv.js` to Swedish, and `extension/_locales/` holds the extension's texts. A new string needs
 both translations, which `node tools/check-i18n.mjs` checks (placeholders such as `{n}` included). The
-repository, the API, stashai and the scripts are in English only.
+repository, the API, the MCP tools and the scripts are in English only.
 
 ## Security in brief
 

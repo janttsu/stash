@@ -1,10 +1,9 @@
-"""Reading the web for the model: one page as text, many links checked at once, and a web search.
+"""Reading the web for the MCP tools: one page as text and many links checked at once.
 
-Requests go straight from this computer, so pages behind your VPN work too. Addresses of this
-machine itself (localhost, link-local) are always refused, and those of the local network unless
-`allow_private` is set: a page must not steer the model into poking at local services. Every
-address is checked before connecting and the address actually connected to is checked again.
-Text from pages is untrusted data; the model is told never to follow instructions in it.
+Requests go from the Stash server. Addresses of the server itself (localhost, link-local) and of private networks
+are always refused: a page must not steer the model into poking at local services. Every address is checked
+before connecting and the address actually connected to is checked again. Text from pages is untrusted data; the
+model is told never to follow instructions in it.
 """
 from __future__ import annotations
 
@@ -31,7 +30,7 @@ BLOCK_TAGS = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "tr", "section", "
 
 
 class Blocked(ValueError):
-    """An address stashai will not fetch."""
+    """An address Stash will not fetch."""
 
 
 @dataclass
@@ -256,10 +255,9 @@ class Web:
             raise ConnectionError(f"DNS lookup failed for {p.hostname} ({e})") from e
         bad = [a for a in addrs if not self.allowed_ip(a)]
         if bad or not addrs:
-            where = "this computer" if any(ipaddress.ip_address(a.split('%')[0]).is_loopback for a in bad) \
+            where = "this server" if any(ipaddress.ip_address(a.split('%')[0]).is_loopback for a in bad) \
                 else "the local network"
-            raise Blocked(f"{p.hostname} is on {where}; not fetched"
-                          + ("" if where == "this computer" else " (set [web] allow_private = true to allow)"))
+            raise Blocked(f"{p.hostname} is on {where}; not fetched")
 
     def fetch(self, url: str, *, body: bool = True, head_only: bool = False) -> Page:
         """head_only reads the page only up to </head> (titles, description), which is far less to download."""

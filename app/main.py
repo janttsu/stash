@@ -49,7 +49,7 @@ COLORS = {"", "red", "orange", "yellow", "green", "teal", "blue", "indigo", "pur
 SCHEMES = {"http", "https", "ftp", "mailto", "tel"}
 DEFAULT_SETTINGS = {
     "theme": "auto", "lang": "", "tab_size": "m", "new_tab": True, "tooltips": True,
-    "favicons": True, "auto_tag_catalog": False, "tag_order": "count", "auto_maintain": True,
+    "favicons": True, "auto_tag_catalog": False, "tag_order": "count", "auto_maintain": True, "assistant_rules": "",
 }
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; "
        "base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
@@ -90,7 +90,8 @@ async def lifespan(app: FastAPI):
         from . import maintenance
         task = asyncio.create_task(maintenance.run(app.state.http))
     try:
-        yield
+        async with mcp_server.session_manager.run():
+            yield
     finally:
         if task:
             task.cancel()
@@ -570,6 +571,7 @@ class SettingsPatch(BaseModel):
     auto_tag_catalog: Optional[bool] = None
     tag_order: Optional[Literal["count", "alpha"]] = None
     auto_maintain: Optional[bool] = None
+    assistant_rules: Optional[str] = Field(None, max_length=6000)
 
 
 @app.patch("/api/settings")
@@ -1546,27 +1548,30 @@ app.include_router(history.session_api)
 app.include_router(api_v1.v1)
 app.include_router(api_v1.session_api)
 
-CLIENT_DIST = BASE / "client" / "dist"
 HISTORY_SCRIPT = BASE / "scripts" / "stash-history-sync.py"
 
 
 @app.api_route("/dl/{name}", methods=["GET", "HEAD"], include_in_schema=False)
-def client_download(name: str):
-    """The stashai terminal client as a wheel (`pipx install https://…/dl/<wheel>`) and the history sync script."""
-    if name == HISTORY_SCRIPT.name:
-        return FileResponse(HISTORY_SCRIPT, media_type="text/x-python; charset=utf-8")
-    path = CLIENT_DIST / name
-    if not re.fullmatch(r"stashai-[\w.]+-py3-none-any\.whl", name) or not path.is_file():
+def download(name: str):
+    """The browsing history sync script."""
+    if name != HISTORY_SCRIPT.name:
         raise err(404, "not_found")
-    return FileResponse(path, media_type="application/zip")
+    return FileResponse(HISTORY_SCRIPT, media_type="text/x-python; charset=utf-8")
 
 
-@app.get("/api/client")
-def client_info():
-    wheels = sorted(CLIENT_DIST.glob("stashai-*-py3-none-any.whl"), key=lambda p: p.stat().st_mtime)
-    if not wheels:
-        return {"wheel": None, "version": None}
-    return {"wheel": f"{ORIGIN}/dl/{wheels[-1].name}", "version": wheels[-1].name.split("-")[1]}
+# --- MCP: Stash for AI assistants (Claude Code, Qwen Code, Gemini CLI, …) at /mcp, with an API key --------------
+from starlette.routing import Route  # noqa: E402
+
+from .mcpserver.server import KeyGate, build_server  # noqa: E402
+
+mcp_server = build_server(ORIGIN)
+app.router.routes.append(Route("/mcp", endpoint=KeyGate(mcp_server.streamable_http_app())))
+
+
+@app.get("/api/mcp")
+def mcp_info(c: Ctx = Depends(ctx)):
+    """What Settings shows: the endpoint address for MCP clients."""
+    return {"url": f"{ORIGIN}/mcp"}
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

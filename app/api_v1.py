@@ -620,6 +620,18 @@ def keys_create(body: KeyCreate, c: Ctx = Depends(ctx)):
     return {"id": kid, "key": key}
 
 
+class KeyPatch(BaseModel):
+    can_write: bool
+
+
+@session_api.patch("/keys/{key_id}")
+def keys_patch(key_id: int, body: KeyPatch, c: Ctx = Depends(ctx)):
+    if not c.con.execute("UPDATE api_keys SET can_write=? WHERE id=? AND user_id=?",
+                         (int(body.can_write), key_id, c.uid)).rowcount:
+        raise err(404, "not_found")
+    return {"ok": True}
+
+
 @session_api.delete("/keys/{key_id}")
 def keys_delete(key_id: int, c: Ctx = Depends(ctx)):
     c.con.execute("DELETE FROM api_keys WHERE id=? AND user_id=?", (key_id, c.uid))

@@ -436,3 +436,8 @@ img.fav { background: var(--fav-plate, transparent); }
   .field--inline { flex-direction: column; align-items: stretch; gap: 4px; }
   .bulkbar { top: 0; }
 }
+
+/* --- settings: assistant (MCP) --- */
+.steps { margin: 6px 0 12px; padding-left: 1.4em; display: grid; gap: 6px; }
+.examples { margin: 4px 0 10px; padding-left: 1.2em; display: grid; gap: 3px; color: var(--muted); font-style: italic; }
+.input.setup { white-space: pre-wrap; word-break: break-all; font-size: .85rem; }

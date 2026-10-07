@@ -44,51 +44,8 @@ with TestClient(app):
     uid = con.execute("SELECT id FROM users WHERE username='alice'").fetchone()[0]
     assert maintenance.active_user_ids(con) == [uid]
 
-    # --- dead links: tagged only after DEAD_THRESHOLD failures in a row, cleared when alive again ---
-    dead_url = "https://gone.example/page"
-    bid = add(dead_url)
-    DEAD = {dead_url}
-
-    async def fake_dead(client, url):
-        return url in DEAD
-
-    net.is_dead = fake_dead
-    for n in range(maintenance.DEAD_THRESHOLD):
-        con.execute("UPDATE bookmarks SET checked_at=NULL")  # pretend the recheck interval has passed
-        run(maintenance.check_dead_batch(con, None, [uid]))
-        streak, dead = con.execute("SELECT dead_streak, dead FROM bookmarks WHERE id=?", (bid,)).fetchone()
-        expected_tag = n + 1 >= maintenance.DEAD_THRESHOLD
-        assert streak == n + 1, (streak, n)
-        assert bool(dead) == expected_tag and (maintenance.DEAD_TAG in tags(con, bid)) == expected_tag
-
-    DEAD.clear()  # the page answers again
-    con.execute("UPDATE bookmarks SET checked_at=NULL")
-    run(maintenance.check_dead_batch(con, None, [uid]))
-    dead, streak = con.execute("SELECT dead, dead_streak FROM bookmarks WHERE id=?", (bid,)).fetchone()
-    assert dead == 0 and streak == 0 and maintenance.DEAD_TAG not in tags(con, bid), "cleared when alive"
-
-    # a one-off 404 (streak resets before the threshold) never tags
-    DEAD.add(dead_url)
-    con.execute("UPDATE bookmarks SET checked_at=NULL")
-    run(maintenance.check_dead_batch(con, None, [uid]))
-    DEAD.clear()
-    con.execute("UPDATE bookmarks SET checked_at=NULL")
-    run(maintenance.check_dead_batch(con, None, [uid]))
-    assert con.execute("SELECT dead_streak FROM bookmarks WHERE id=?", (bid,)).fetchone()[0] == 0
-
-    # --- duplicates: every copy after the first is tagged, and the tag clears when a copy goes ---
-    dup = "https://dup.example/x"
-    first, second = add(dup), add(dup)
-    maintenance.reconcile_duplicates(con, uid)
-    assert maintenance.DUPLICATE_TAG not in tags(con, first), "the oldest copy is not a duplicate"
-    assert maintenance.DUPLICATE_TAG in tags(con, second)
-    third = add(dup)
-    maintenance.reconcile_duplicates(con, uid)
-    assert all(maintenance.DUPLICATE_TAG in tags(con, b) for b in (second, third))
-    ok(web.delete(f"/api/bookmarks/{second}"))
-    ok(web.delete(f"/api/bookmarks/{third}"))
-    maintenance.reconcile_duplicates(con, uid)
-    assert maintenance.DUPLICATE_TAG not in tags(con, first), "no copies left, so no duplicate tag"
+    # --- only titles and icons are looked after: duplicates and dead links are not touched any more ---
+    assert not hasattr(maintenance, "reconcile_duplicates") and not hasattr(maintenance, "check_dead_batch")
 
     # --- titles and icons -----------------------------------------------------------
     unnamed = add("https://site.example/a")                 # title defaults to the url
