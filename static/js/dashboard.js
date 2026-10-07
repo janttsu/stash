@@ -25,6 +25,8 @@ export async function renderDashboard(container, focus) {
 
 export async function refresh() {
   await loadDash();
+  // the page may have moved on while the data loaded (a live update racing a click elsewhere)
+  if (!root?.isConnected || !root.classList.contains('dashboard')) return;
   draw();
 }
 

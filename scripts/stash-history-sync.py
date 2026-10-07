@@ -14,7 +14,8 @@ What is sent: for each http(s) address visited in the last --days days (default 
 its title, visits in the last 30/90/365 days, all visits, and the first and last visit. Query
 parameters that often carry secrets (token, code, session, key, password, …) are removed first, and
 addresses matching --exclude patterns (or "exclude" in the config) are not sent at all. Each sync
-replaces what this computer sent before. The API key needs “Allow changes” (Stash → Settings → API keys).
+replaces what this computer sent before. Get the API key from Stash → Settings → Browsing history →
+“Create a key for this computer”.
 """
 from __future__ import annotations
 
@@ -183,7 +184,7 @@ def setup() -> None:
     url = input(f"Stash address [{cfg.get('url', 'https://')}]: ").strip() or cfg.get("url", "")
     if not url.startswith("https://") and not re.match(r"http://(localhost|127\.|192\.168\.|10\.)", url):
         sys.exit("The address must start with https://")
-    key = getpass.getpass("API key that can change (Stash → Settings → API keys; hidden): ").strip() or cfg.get("key", "")
+    key = getpass.getpass("API key (Stash → Settings → Browsing history → Create a key for this computer; hidden): ").strip() or cfg.get("key", "")
     source = input(f"Name of this computer in Stash [{cfg.get('source', default_source())}]: ").strip() \
         or cfg.get("source", default_source())
     cfg.update(url=url.rstrip("/"), key=key, source=source)

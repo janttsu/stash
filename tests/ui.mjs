@@ -175,6 +175,7 @@ try {
     'bookmark dragged into another category');
   await until(`await (async () => { const d = await $api('GET', '/api/dashboard'); const news = d.categories.find((c) => c.name === 'News').id;
     return d.bookmarks.some((b) => b.category_id === news && b.title === 'Wikipedia'); })()`, 'the move is saved on the server');
+  await sleep(2500);  // the saved move makes the page redraw itself (live update): let that happen before dragging again
   await drag(await center('.cat.c-green .cat__name'), await center('.cat.c-blue .cat__name'));
   await until(`document.querySelector('.cat.c-green').parentElement === document.querySelector('.cat.c-blue').parentElement`,
     'category dragged into another column');
@@ -300,7 +301,7 @@ try {
   await until(`document.querySelectorAll('.settings .card').length === 9 && !!$t('.settings h2', 'Users and registration')`, 'nine settings cards incl. admin');
   // API key: created in a dialog, shown once, listed by its prefix, then revoked
   // the assistant (MCP) card: instructions, the address, and connecting an assistant makes a key with a ready setup
-  check(await js(`return !!$t('.settings h3', 'How to use it') && document.querySelectorAll('.settings .steps li').length === 4`), 'MCP instructions');
+  await until(`!!$t('.settings h3', 'How to use it') && $t('.settings h3', 'How to use it').nextElementSibling.children.length === 4`, 'MCP instructions');
   check(await js(`return [...document.querySelectorAll('.settings input.mono')].some((i) => i.value === location.origin + '/mcp')`), 'MCP address shown');
   await js(`$t('.settings h2', 'Assistant (MCP)').scrollIntoView()`);
   await shot('12a-mcp-card');
@@ -332,12 +333,25 @@ try {
   await waitFor('dialog[open]');
   await js(`$click('dialog[open] .btn', 'Undo')`);
   await until(`!!$t('.settings .muted', 'Undone')`, 'change undone');
-  // the undo redraws Settings (live update), so wait for the key list to be back
-  await until(`!!$t('.settings .btn.danger', 'Revoke')`, 'key list redrawn');
+  // the undo makes the open page redraw itself (live update): start from a freshly loaded page instead
+  await goto('/#/bookmarks');
+  await goto('/#/settings');
+  await js(HELPERS);
+  await until(`!!$t('.settings .btn.danger', 'Revoke')`, 'key list drawn');
   await js(`$click('.settings .btn.danger', 'Revoke')`);
   await waitFor('dialog[open]');
   await js(`$click('dialog[open] .btn', 'Revoke')`);
   await until(`!!$t('.settings .muted', 'No keys yet.')`, 'key revoked');
+  // the browsing history card makes its own key, shown once and listed with the others
+  await js(`$t('.settings h2', 'Browsing history').scrollIntoView(); $click('.settings .btn', 'Create a key for this computer')`);
+  await waitFor('dialog[open] input[type=text]');
+  check(await js(`return document.querySelector('dialog[open] input[type=text]').value`) === 'Browsing history', 'key name filled in');
+  check(await js(`return !document.querySelector('dialog[open] input[type=checkbox]')`), 'a history key always may change');
+  await js(`$click('dialog[open] .btn', 'Create key')`);
+  await until(`!!document.querySelector('dialog[open] input.mono') && document.querySelector('dialog[open] input.mono').value.startsWith('stash_')`, 'history key shown');
+  await shot('12c-history-key');
+  await js(`$click('dialog[open] .btn', 'Done')`);
+  await until(`!!$t('.settings td', 'Browsing history')`, 'history key in the key list');
   check((await fetch(`${BASE}/api/v1/me`, { headers: { Authorization: `Bearer ${apiKey}` } })).status === 401, 'revoked key stops working');
   check(await js(`return document.querySelector('.bookmarklet').getAttribute('href').startsWith('javascript:')`), 'bookmarklet link');
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 2600, deviceScaleFactor: 1, mobile: false });
