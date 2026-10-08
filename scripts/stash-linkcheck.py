@@ -309,7 +309,7 @@ player_status OK means the video plays.
 human", player_status LOGIN_REQUIRED (sign-in or age check), HTTP 401, 403, 429 or 5xx, a timeout, a certificate error, a consent or age wall still covering the \
 page, or an empty page that needs scripts. When in doubt, answer "unsure": a wrong "gone" deletes a bookmark.
 
-"tags" is the complete list of tags the bookmark should have, 1 to 5 of them, only when the verdict is "exists" \
+"tags" is the complete list of tags the bookmark should have, 1 to 5 of them (up to 8 for video and gallery pages), only when the verdict is "exists" \
 (otherwise an empty list). You get the bookmark's current_tags and the user's tag_vocabulary (tag and how many \
 bookmarks have it). Rules:
 - Keep every current tag that still describes the page. Drop a current tag only when it clearly does not fit, is \
@@ -319,6 +319,10 @@ tags; use the same language and spelling style as the vocabulary.
 - Make a new tag only when no vocabulary tag fits: one lowercase word or two joined with a hyphen.
 - Never use the tags "dead", "duplicate" or "broken", and never put the site's name in a tag unless it is \
 already a tag. Tags describe the content, not the verdict.
+- For a page whose main content is a video, a recording or a gallery, tag what the content is about, concretely: \
+its genre or category, the topic, the people named in the title or text, the setting and the kind of content, up \
+to 8 tags. A general tag of the site's kind stays, but is not enough on its own: someone must be able to find the \
+item by what it shows. Use only what the title, headings, description and text say; do not guess.
 - A page you could read only partly (consent wall, little text) is tagged from what you did see; if that is \
 too little to tell, return the current tags unchanged."""
 
@@ -326,19 +330,19 @@ VERDICT_SCHEMA = {
     "type": "object",
     "properties": {"verdict": {"type": "string", "enum": ["exists", "gone", "unsure"]},
                    "reason": {"type": "string"},
-                   "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 6}},
+                   "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 8}},
     "required": ["verdict", "reason", "tags"],
 }
 
 
 def clean_tags(raw) -> list[str]:
-    """Tags as Stash writes them: lowercase, trimmed, no duplicates, at most 5."""
+    """Tags as Stash writes them: lowercase, trimmed, no duplicates, at most 8."""
     out: list[str] = []
     for t in raw if isinstance(raw, list) else []:
         t = re.sub(r"\s+", " ", str(t).strip().lower().lstrip("#"))[:40]
         if t and t not in out and t not in BANNED_TAGS:
             out.append(t)
-    return out[:5]
+    return out[:8]
 
 
 def judge(args, bookmark: dict, seen: dict, vocabulary: list) -> dict:
