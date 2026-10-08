@@ -425,7 +425,7 @@ export const FI = {
   "Link check": "Linkkien tarkistus",
   "Copy the key. In the second step the script asks for an API key: paste this one.": "Kopioi avain. Toisessa vaiheessa skripti kysyy API-avainta: liitä tämä.",
   "On your computer, install Python 3, Chromium and Ollama, then run these in a terminal. The script asks for the address of this Stash and the key.": "Asenna koneellesi Python 3, Chromium ja Ollama ja aja nämä päätteessä. Skripti kysyy tämän Stashin osoitteen ja avaimen.",
-  "Nothing is removed without asking, and removed bookmarks wait 30 days in the Trash. Tag changes are made as one change that can be undone; --no-tags leaves the tags alone and --resume continues an earlier run.": "Mitään ei poisteta kysymättä, ja poistetut kirjanmerkit odottavat 30 päivää roskakorissa. Tagimuutokset tehdään yhtenä kumottavana muutoksena; --no-tags jättää tagit rauhaan ja --resume jatkaa aiempaa ajoa.",
+  "Nothing is removed without asking, and removed bookmarks wait 30 days in the Trash. Tag changes are made as one change that can be undone; --no-tags leaves the tags alone, --tag-language Finnish chooses the language of new tags and --resume continues an earlier run.": "Mitään ei poisteta kysymättä, ja poistetut kirjanmerkit odottavat 30 päivää roskakorissa. Tagimuutokset tehdään yhtenä kumottavana muutoksena; --no-tags jättää tagit rauhaan, --tag-language Finnish valitsee uusien tagien kielen ja --resume jatkaa aiempaa ajoa.",
 };
 
 let lang = 'en';

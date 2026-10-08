@@ -296,7 +296,7 @@ read the page. `scripts/stash-linkcheck.py` does that on your own computer with 
    tag. The changes are printed and applied as one undoable Stash change without asking. Unreadable pages
    ("unsure") are never retagged. For a video, recording or gallery page it tags what the content is about (genre,
    topic, the people named, the setting), up to 8 tags, so the item can be found by what it shows. `--no-tags`
-   leaves the tags alone.
+   leaves the tags alone and `--tag-language Finnish` (or any language) makes new tags come in that language.
 
 ```sh
 sudo pacman -S --needed python chromium ollama      # Arch; Ollama also from ollama.com
