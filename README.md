@@ -69,7 +69,8 @@ without handing it to anyone.
 | `scripts/stash-linkcheck.py` | Finds bookmarks whose content is gone with a local model (served at `/dl/stash-linkcheck.py`) |
 | `static/` | The web UI: native ES modules, no build step |
 | `extension/` | Browser extension (downloadable from the app at `/extension.zip`) |
-| `data/` | Database and favicon cache: not in version control, back this up |
+| `data/` | Database, favicon cache and `backups/`: not in version control |
+| `scripts/backup.sh` | Hourly compressed copy of the database, 30 days kept (see *Backups*) |
 
 ## Running it
 
@@ -107,6 +108,55 @@ While the variable is set, the setting in Settings → Users and registration is
 
 Environment variables: `STASH_ORIGIN` (public address), `STASH_DATA` (data directory, default `./data`),
 `STASH_REGISTRATION` (see above), `STASH_MAINTENANCE` (`off` turns the background upkeep off; see below).
+
+## Backups
+
+`scripts/backup.sh` writes a consistent, zstd-compressed copy of the whole database (every account's bookmarks,
+tabs, categories, tags, trash, settings and change history) to `data/backups/stash-YYYY-MM-DD_HHMM.db.zst`, checks
+it with `PRAGMA integrity_check`, and deletes copies older than 30 days (`STASH_BACKUP_DAYS`). It is safe while
+Stash runs. Run hourly, that is a version history of 720 copies, about 1 MB each for a few thousand bookmarks.
+It needs `sqlite3` and `zstd`. As systemd user units:
+
+```ini
+# ~/.config/systemd/user/stash-backup.service
+[Unit]
+Description=Stash: database backup
+
+[Service]
+Type=oneshot
+ExecStart=%h/stash/scripts/backup.sh
+
+# ~/.config/systemd/user/stash-backup.timer
+[Unit]
+Description=Stash: database backup every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```sh
+systemctl --user daemon-reload && systemctl --user enable --now stash-backup.timer
+systemctl --user start stash-backup        # one backup now
+ls data/backups/                           # the copies
+```
+
+The copies stay on the same disk, so also back up `data/` off the server (for example with restic).
+
+To return the whole Stash to an earlier hour, stop it and put the copy in place:
+
+```sh
+systemctl --user stop stash
+cp data/stash.db data/stash-before-restore.db
+zstd -d -f data/backups/stash-2026-10-08_1100.db.zst -o data/stash.db && rm -f data/stash.db-wal data/stash.db-shm
+systemctl --user start stash
+```
+
+To look at or take back only some bookmarks, open a copy beside the live database instead
+(`zstd -d data/backups/… -o /tmp/old.db`, then `sqlite3 /tmp/old.db`).
 
 ## Using Stash from an AI assistant (MCP)
 
