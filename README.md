@@ -294,7 +294,9 @@ read the page. `scripts/stash-linkcheck.py` does that on your own computer with 
    current tags and the tags you use (with counts), keeps the tags that still fit, adds fitting ones from your own
    vocabulary (a new tag only when none fits) and drops the ones that clearly do not or that duplicate a better
    tag. The changes are printed and applied as one undoable Stash change without asking. Unreadable pages
-   ("unsure") are never retagged. `--no-tags` leaves the tags alone.
+   ("unsure") are never retagged. For a video, recording or gallery page it tags what the content is about (genre,
+   topic, the people named, the setting), up to 8 tags, so the item can be found by what it shows. `--no-tags`
+   leaves the tags alone.
 
 ```sh
 sudo pacman -S --needed python chromium ollama      # Arch; Ollama also from ollama.com

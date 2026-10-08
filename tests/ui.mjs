@@ -298,7 +298,7 @@ try {
   // --- settings ---
   await goto('/#/settings');
   await js(HELPERS);
-  await until(`document.querySelectorAll('.settings .card').length === 9 && !!$t('.settings h2', 'Users and registration')`, 'nine settings cards incl. admin');
+  await until(`document.querySelectorAll('.settings .card').length === 10 && !!$t('.settings h2', 'Users and registration')`, 'ten settings cards incl. admin');
   // API key: created in a dialog, shown once, listed by its prefix, then revoked
   // the assistant (MCP) card: instructions, the address, and connecting an assistant makes a key with a ready setup
   await until(`!!$t('.settings h3', 'How to use it') && $t('.settings h3', 'How to use it').nextElementSibling.children.length === 4`, 'MCP instructions');
@@ -352,6 +352,12 @@ try {
   await shot('12c-history-key');
   await js(`$click('dialog[open] .btn', 'Done')`);
   await until(`!!$t('.settings td', 'Browsing history')`, 'history key in the key list');
+  // the link check card offers its script and a key for it
+  check(await js(`return !!$t('.settings h2', 'Link check on your computer') && [...document.querySelectorAll('.settings textarea')].some((x) => x.value.includes('/dl/stash-linkcheck.py'))`), 'link check card with the script');
+  await js(`$t('.settings h2', 'Link check on your computer').scrollIntoView(); $click('.settings .btn', 'Create a key for the link check')`);
+  await waitFor('dialog[open] input[type=text]');
+  check(await js(`return document.querySelector('dialog[open] input[type=text]').value`) === 'Link check', 'link check key name filled in');
+  await js(`$click('dialog[open] .btn', 'Cancel')`);
   check((await fetch(`${BASE}/api/v1/me`, { headers: { Authorization: `Bearer ${apiKey}` } })).status === 401, 'revoked key stops working');
   check(await js(`return document.querySelector('.bookmarklet').getAttribute('href').startsWith('javascript:')`), 'bookmarklet link');
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 2600, deviceScaleFactor: 1, mobile: false });
