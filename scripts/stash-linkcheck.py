@@ -49,7 +49,7 @@ from pathlib import Path
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "stash" / "linkcheck.json"
 REPORT = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "stash" / "linkcheck-report.json"
 MODEL = "gemma4:e4b-128k"
-OLLAMA = "http://localhost:11434"
+OLLAMA = "http://localhost:11435"
 USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/140.0.0.0 Safari/537.36")
 TEXT_CHARS = 4000
