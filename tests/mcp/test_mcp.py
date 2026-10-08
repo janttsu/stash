@@ -85,6 +85,21 @@ def test_read_only_and_revoked_keys(api, stash):
     assert other.status_code == 404
 
 
+def test_tag_each_replace_like_linkcheck(api, stash):
+    """stash-linkcheck.py puts tags in order with one tag_each that replaces the tags of the bookmarks it names."""
+    mcp = Client(stash["raw"], stash["key"])
+    mcp.call("search", text=["buns"])
+    item = json.loads(mcp.call("list_urls", set_name="S1")[1])["items"][0]
+    ops = [{"op": "tag_each", "replace": True, "tags": {str(item["id"]): ["bakery", "recipe"]}}]
+    err, text = mcp.call("preview_changes", ops=ops, summary="Tags")
+    assert not err, text
+    err, text = mcp.call("apply_changes", preview_id=text.split()[1].rstrip(":"))
+    assert not err, text
+    assert sorted(Store(api.snapshot()).bookmarks[item["id"]].tags) == ["bakery", "recipe"]
+    again = json.loads(mcp.call("list_urls", set_name="S1")[1])
+    assert sorted(again["items"][0]["tags"]) == ["bakery", "recipe"]
+
+
 def test_list_urls_and_delete_by_ids(api, stash):
     """What stash-linkcheck.py does: whole addresses of a set, then a delete by ids through a preview."""
     mcp = Client(stash["raw"], stash["key"])
@@ -94,6 +109,8 @@ def test_list_urls_and_delete_by_ids(api, stash):
     assert not err and data["total"] == 1 and data["items"][0]["url"].startswith("http")
     assert json.loads(mcp.call("list_urls", set_name="ALL", limit=2)[1])["total"] == 7
     bid = data["items"][0]["id"]
+    assert isinstance(data["items"][0]["tags"], list) and data["items"][0]["where"]
+    assert data["tag_vocabulary"] and all(len(pair) == 2 for pair in data["tag_vocabulary"])
     err, text = mcp.call("preview_changes", ops=[{"op": "delete", "ids": [bid]}], summary="Gone")
     assert not err and "1 deleted" in text
     err, text = mcp.call("apply_changes", preview_id=text.split()[1].rstrip(":"))
