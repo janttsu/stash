@@ -418,6 +418,14 @@ export const FI = {
   "Delete the history sent by {name}? A scheduled sync sends it again unless you stop it on that computer.": "Poistetaanko koneen {name} lähettämä historia? Ajastettu lähetys lähettää sen uudelleen, ellet pysäytä sitä kyseisellä koneella.",
   "No history yet.": "Historiaa ei ole vielä lähetetty.",
   "Sending the history (macOS or Linux)": "Historian lähettäminen (macOS tai Linux)",
+  "Link check on your computer": "Linkkien tarkistus omalla koneellasi",
+  "A script on your computer opens every bookmark in a browser and lets an AI model running on that computer (Ollama) read the page. It finds bookmarks whose content is gone, such as removed videos, missing pages and taken-over domains, and puts the tags of the others in order. The pages are read on your computer; only the results go to this Stash.": "Koneellasi toimiva skripti avaa jokaisen kirjanmerkin selaimessa ja antaa saman koneen tekoälymallin (Ollama) lukea sivun. Se löytää kirjanmerkit, joiden sisältö on poissa, kuten poistetut videot, puuttuvat sivut ja toisen haltuun joutuneet verkkotunnukset, ja laittaa muiden tagit kuntoon. Sivut luetaan sinun koneellasi; vain tulokset menevät tähän Stashiin.",
+  "Create a key that may make changes. Copy it: it is shown only once.": "Luo avain, jolla saa tehdä muutoksia. Kopioi se: se näytetään vain kerran.",
+  "Create a key for the link check": "Luo avain linkkien tarkistukseen",
+  "Link check": "Linkkien tarkistus",
+  "Copy the key. In the second step the script asks for an API key: paste this one.": "Kopioi avain. Toisessa vaiheessa skripti kysyy API-avainta: liitä tämä.",
+  "On your computer, install Python 3, Chromium and Ollama, then run these in a terminal. The script asks for the address of this Stash and the key.": "Asenna koneellesi Python 3, Chromium ja Ollama ja aja nämä päätteessä. Skripti kysyy tämän Stashin osoitteen ja avaimen.",
+  "Nothing is removed without asking, and removed bookmarks wait 30 days in the Trash. Tag changes are made as one change that can be undone; --no-tags leaves the tags alone and --resume continues an earlier run.": "Mitään ei poisteta kysymättä, ja poistetut kirjanmerkit odottavat 30 päivää roskakorissa. Tagimuutokset tehdään yhtenä kumottavana muutoksena; --no-tags jättää tagit rauhaan ja --resume jatkaa aiempaa ajoa.",
 };
 
 let lang = 'en';

@@ -393,4 +393,12 @@ export const SV = {
   "Delete the history sent by {name}? A scheduled sync sends it again unless you stop it on that computer.": "Ta bort historiken som {name} har skickat? En schemalagd sändning skickar den igen om du inte stoppar den på den datorn.",
   "No history yet.": "Ingen historik ännu.",
   "Sending the history (macOS or Linux)": "Skicka historiken (macOS eller Linux)",
+  "Link check on your computer": "Länkkontroll på din dator",
+  "A script on your computer opens every bookmark in a browser and lets an AI model running on that computer (Ollama) read the page. It finds bookmarks whose content is gone, such as removed videos, missing pages and taken-over domains, and puts the tags of the others in order. The pages are read on your computer; only the results go to this Stash.": "Ett skript på din dator öppnar varje bokmärke i en webbläsare och låter en AI-modell på samma dator (Ollama) läsa sidan. Det hittar bokmärken vars innehåll är borta, som borttagna videor, saknade sidor och övertagna domäner, och ordnar taggarna på de andra. Sidorna läses på din dator; bara resultaten skickas till den här Stash.",
+  "Create a key that may make changes. Copy it: it is shown only once.": "Skapa en nyckel som får göra ändringar. Kopiera den: den visas bara en gång.",
+  "Create a key for the link check": "Skapa en nyckel för länkkontrollen",
+  "Link check": "Länkkontroll",
+  "Copy the key. In the second step the script asks for an API key: paste this one.": "Kopiera nyckeln. I andra steget frågar skriptet efter en API-nyckel: klistra in den här.",
+  "On your computer, install Python 3, Chromium and Ollama, then run these in a terminal. The script asks for the address of this Stash and the key.": "Installera Python 3, Chromium och Ollama på din dator och kör detta i en terminal. Skriptet frågar efter adressen till den här Stash och nyckeln.",
+  "Nothing is removed without asking, and removed bookmarks wait 30 days in the Trash. Tag changes are made as one change that can be undone; --no-tags leaves the tags alone and --resume continues an earlier run.": "Inget tas bort utan att fråga, och borttagna bokmärken väntar 30 dagar i papperskorgen. Taggändringar görs som en ändring som kan ångras; --no-tags lämnar taggarna ifred och --resume fortsätter en tidigare körning.",
 };

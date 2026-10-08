@@ -8,7 +8,7 @@ let root = null;
 export async function renderSettings(container) {
   root = container;
   root.className = 'view settings';
-  const cards = [appearance(), behaviour(), addButtons(), importExport(), apiKeys(), changeHistory(), browsingHistory(), account()];
+  const cards = [appearance(), behaviour(), addButtons(), importExport(), apiKeys(), changeHistory(), browsingHistory(), linkCheck(), account()];
   fill(root, h('h1', null, t('Settings')), ...cards);
   if (state.user.is_admin) {
     const adminCard = h('section', { class: 'card' }, h('h2', null, t('Users and registration')));
@@ -325,6 +325,36 @@ function browsingHistory() {
   };
   draw();
   return card;
+}
+
+function linkCheck() {
+  const script = `${location.origin}/dl/stash-linkcheck.py`;
+  const python = '~/.local/share/stash-linkcheck/bin/python';
+  const commands = [
+    'ollama pull gemma4:e4b-128k',
+    'python3 -m venv ~/.local/share/stash-linkcheck',
+    '~/.local/share/stash-linkcheck/bin/pip install playwright',
+    `curl -o ~/stash-linkcheck.py ${script}`,
+    `${python} ~/stash-linkcheck.py --setup`,
+    `${python} ~/stash-linkcheck.py`,
+  ].join('\n');
+  return h('section', { class: 'card' },
+    h('h2', null, t('Link check on your computer')),
+    h('p', null, t('A script on your computer opens every bookmark in a browser and lets an AI model running on that computer (Ollama) read the page. It finds bookmarks whose content is gone, such as removed videos, missing pages and taken-over domains, and puts the tags of the others in order. The pages are read on your computer; only the results go to this Stash.')),
+    h('ol', { class: 'steps' },
+      h('li', null, t('Create a key that may make changes. Copy it: it is shown only once.'),
+        h('div', { class: 'row' }, h('button', {
+          type: 'button', class: 'btn primary',
+          onclick: () => createKey({
+            title: t('Create a key for the link check'), name: t('Link check'), askWrite: false,
+            hint: t('Copy the key. In the second step the script asks for an API key: paste this one.'),
+          }),
+        }, t('Create a key for the link check')))),
+      h('li', null, t('On your computer, install Python 3, Chromium and Ollama, then run these in a terminal. The script asks for the address of this Stash and the key.'),
+        h('div', { class: 'row' },
+          h('textarea', { class: 'input mono', rows: 6, readOnly: true, value: commands, onfocus: (e) => e.target.select() }),
+          h('button', { type: 'button', class: 'btn', onclick: () => copyText(commands) }, t('Copy'))))),
+    h('p', { class: 'muted small' }, t('Nothing is removed without asking, and removed bookmarks wait 30 days in the Trash. Tag changes are made as one change that can be undone; --no-tags leaves the tags alone and --resume continues an earlier run.')));
 }
 
 // --- account -----------------------------------------------------------------
