@@ -118,9 +118,11 @@ class Session:
         self.ensure()
         ids = self.store.resolve(set_name)
         offset, limit = max(0, offset), max(1, min(1000, limit))
-        items = [{"id": i, "url": self.store.bookmarks[i].url, "title": self.store.bookmarks[i].title}
+        items = [{"id": i, "url": self.store.bookmarks[i].url, "title": self.store.bookmarks[i].title,
+                  "tags": self.store.bookmarks[i].tags, "where": self.store.bookmarks[i].where}
                  for i in ids[offset:offset + limit]]
-        return json.dumps({"set": set_name, "total": len(ids), "offset": offset, "items": items}, ensure_ascii=False)
+        return json.dumps({"set": set_name, "total": len(ids), "offset": offset, "items": items,
+                           "tag_vocabulary": [[t, n] for t, n in self.store.tags[:300]]}, ensure_ascii=False)
 
     def combine(self, a: str, b: str, how: str = "union", label: str = "") -> str:
         self.ensure()

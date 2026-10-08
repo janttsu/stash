@@ -189,7 +189,7 @@ Then ask, for example "which bookmarks about Python have no tags? suggest tags f
 | `overview` | tags with counts, tabs and categories, the size of the collection, your rules, the sets made so far |
 | `search` | finds bookmarks by words, regex, site, tags, tab, category, dates or use, and keeps them as a set (S1, S2, …) |
 | `show`, `combine` | list a set; union, intersection or difference of two sets |
-| `list_urls` | the whole addresses of a set as JSON, for programs that open the pages themselves |
+| `list_urls` | the whole addresses of a set as JSON with their tags and the tag vocabulary, for programs that open the pages themselves |
 | `browsing_history` | visited addresses from your synced Firefox history, also those not bookmarked |
 | `read_page` | reads one page as text |
 | `check_links` | checks every link of a set: alive, moved, dead, unclear |
@@ -290,6 +290,11 @@ read the page. `scripts/stash-linkcheck.py` does that on your own computer with 
 4. The gone ones are listed with their reasons. You answer: remove all, none, or keep the ids you name. The
    removal is one Stash change through `preview_changes` and `apply_changes`: undoable, and the bookmarks wait
    30 days in the trash.
+5. For the pages that exist, the same answer holds the tags that fit them. The model sees the bookmark's
+   current tags and the tags you use (with counts), keeps the tags that still fit, adds fitting ones from your own
+   vocabulary (a new tag only when none fits) and drops the ones that clearly do not or that duplicate a better
+   tag. The changes are printed and applied as one undoable Stash change without asking. Unreadable pages
+   ("unsure") are never retagged. `--no-tags` leaves the tags alone.
 
 ```sh
 sudo pacman -S --needed python chromium ollama      # Arch; Ollama also from ollama.com
@@ -303,7 +308,7 @@ curl -o ~/stash-linkcheck.py https://stash.example.com/dl/stash-linkcheck.py
 
 The key comes from Settings → Assistant (MCP) → Create a key for a program, with "Allow changes" (a read-only key
 can check and list but not remove). The verdicts are saved in `~/.cache/stash/linkcheck-report.json`;
-`--resume` reuses them and checks only the rest, `--no-delete` only reports, `--show-browser` shows the window.
+`--resume` reuses them and checks only the rest, `--no-delete` only skips the removal (tags are still put in order), `--no-tags` skips the tagging, `--show-browser` shows the window.
 
 ## Tests
 
