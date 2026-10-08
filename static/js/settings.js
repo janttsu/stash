@@ -354,7 +354,7 @@ function linkCheck() {
         h('div', { class: 'row' },
           h('textarea', { class: 'input mono', rows: 6, readOnly: true, value: commands, onfocus: (e) => e.target.select() }),
           h('button', { type: 'button', class: 'btn', onclick: () => copyText(commands) }, t('Copy'))))),
-    h('p', { class: 'muted small' }, t('Nothing is removed without asking, and removed bookmarks wait 30 days in the Trash. Tag changes are made as one change that can be undone; --no-tags leaves the tags alone and --resume continues an earlier run.')));
+    h('p', { class: 'muted small' }, t('Nothing is removed without asking, and removed bookmarks wait 30 days in the Trash. Tag changes are made as one change that can be undone; --no-tags leaves the tags alone, --tag-language Finnish chooses the language of new tags and --resume continues an earlier run.')));
 }
 
 // --- account -----------------------------------------------------------------

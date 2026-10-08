@@ -33,6 +33,7 @@ Use:
   stash-linkcheck.py --resume              reuse the verdicts of the last report, check only the rest
   stash-linkcheck.py --no-delete           only report (tags are still put in order)
   stash-linkcheck.py --no-tags             do not touch tags
+  stash-linkcheck.py --tag-language Finnish   write new tags in this language (default: the language of your tags)
   stash-linkcheck.py --show-browser        watch the browser work (for finding out why a page fails)
 
 Run it with the Python of that venv (~/.local/share/stash-linkcheck/bin/python). The report of every run is
@@ -316,6 +317,9 @@ bookmarks have it). Rules:
 a misspelling, or is a duplicate of a better vocabulary tag (same meaning, e.g. "videos" next to "video").
 - Add tags from the vocabulary that describe what the page is (its kind, topic or purpose). Prefer common \
 tags; use the same language and spelling style as the vocabulary.
+- If the facts hold "tag_language", write every new tag in that language (translate the idea, not the page's \
+words), and when a vocabulary tag in that language means the same, use it instead of a foreign one. Without it, \
+follow the language of the vocabulary.
 - Make a new tag only when no vocabulary tag fits: one lowercase word or two joined with a hyphen.
 - Never use the tags "dead", "duplicate" or "broken", and never put the site's name in a tag unless it is \
 already a tag. Tags describe the content, not the verdict.
@@ -350,6 +354,8 @@ def judge(args, bookmark: dict, seen: dict, vocabulary: list) -> dict:
     if args.tags:
         facts["current_tags"] = bookmark.get("tags", [])
         facts["tag_vocabulary"] = [f"{t} {n}" for t, n in vocabulary]
+        if args.tag_language:
+            facts["tag_language"] = args.tag_language
     body = {
         "model": args.model, "stream": False, "format": VERDICT_SCHEMA,
         "options": {"temperature": 0, "num_ctx": args.num_ctx},
@@ -554,6 +560,8 @@ def main() -> None:
     r.add_argument("--resume", action="store_true", help="reuse verdicts in the report, check only the rest")
     r.add_argument("--no-delete", action="store_true", help="only report, do not offer removal")
     r.add_argument("--no-tags", dest="tags", action="store_false", help="do not put the tags in order")
+    r.add_argument("--tag-language", default="", metavar="LANGUAGE",
+                   help="language for new tags, e.g. Finnish, Swedish, English (default: the language of your tags)")
     args = p.parse_args()
 
     cfg = setup() if args.setup else load_config()
