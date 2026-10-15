@@ -460,6 +460,30 @@ function drawJob() {
     h('button', { type: 'button', class: 'linklike small', onclick: dismiss }, t('Dismiss')));
 }
 
+// Pasted web addresses, one per line, straight into the Catalog. Anything else on a line is ignored.
+export async function pasteLinksDialog() {
+  const text = h('textarea', { class: 'input paste-links', rows: 14, spellcheck: 'false', placeholder: 'https://' });
+  const added = await openModal(t('Add links'), h('div', { class: 'form' },
+    h('p', { class: 'muted' }, t('Paste or type web addresses, one per line. Lines without an address are ignored. The bookmarks go to the Catalog.')),
+    text), [
+    { label: t('Cancel') },
+    {
+      label: t('Add'), kind: 'primary',
+      action: () => (text.value.trim() ? api('POST', '/api/bookmarks/paste', { text: text.value }) : false),
+    },
+  ]);
+  if (!added) return false;
+  await openModal(t('Links added'), h('ul', { class: 'plain' },
+    h('li', null, t('{n} bookmarks added', { n: added.added })),
+    added.duplicates > 0 && h('li', null, t('{n} skipped because you already had them', { n: added.duplicates })),
+    added.invalid > 0 && h('li', null, t('{n} skipped (not web addresses)', { n: added.invalid })),
+    added.over_limit > 0 && h('li', null, t('{n} skipped because the limit of bookmarks is reached', { n: added.over_limit })),
+    added.ignored_lines > 0 && h('li', null, t('{n} lines had no web address and were ignored', { n: added.ignored_lines }))), [
+    { label: t('OK'), kind: 'primary', action: () => true },
+  ]);
+  return added.added > 0;
+}
+
 export async function importDialog() {
   const file = h('input', { type: 'file', accept: '.html,.htm,text/html', required: true, class: 'input' });
   const radio = (value, checked) => h('input', { type: 'radio', name: 'import-mode', value, checked });

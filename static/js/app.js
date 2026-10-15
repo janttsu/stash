@@ -1,6 +1,6 @@
 // Entry point of the main app: session check, header, hash routing.
 import { renderAuth } from './auth.js';
-import { leaveBookmarks, refreshBookmarks, renderBookmarks } from './bookmarks.js';
+import { leaveBookmarks, pasteLinksDialog, refreshBookmarks, renderBookmarks } from './bookmarks.js';
 import { api, applyTheme, attempt, fill, h, icon, showMenu, state } from './core.js';
 import { refresh as refreshDashboard, renderDashboard } from './dashboard.js';
 import { setLang, t } from './i18n.js';
@@ -80,6 +80,7 @@ function shell() {
         type: 'button', class: 'btn top__user', 'aria-label': t('Account'),
         onclick: (e) => showMenu(e.currentTarget, [
           { heading: state.user.username },
+          { label: t('Add links…'), action: () => pasteLinksDialog() },
           { label: t('Trash'), action: () => { location.hash = '#/trash'; } },
           { label: t('Settings'), action: () => { location.hash = '#/settings'; } },
           { label: t('Sign out'), action: () => attempt(async () => { await api('POST', '/api/logout'); location.href = '/'; }) },
