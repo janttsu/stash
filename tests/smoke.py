@@ -249,6 +249,22 @@ with TestClient(app):  # runs startup (schema creation)
     names = {c["name"] for c in ok(b.get("/api/dashboard"))["categories"]}
     assert stats["imported"] == 4 and {"Bookmarks bar", "Bookmarks bar / Dev Tools", "Imp"} <= names
 
+    # --- links pasted as text: one per line, the rest is ignored ---
+    pasted = ("Hei\nhttps://paste.example/a, ja muu teksti\n- www.paste.example/b.\n"
+              "https://paste.example/a\njavascript:alert(1)\n\nhttps://fi.wikipedia.org/wiki/Foo_(bar)).\n")
+    assert importer.find_urls(pasted) == (
+        ["https://paste.example/a", "https://www.paste.example/b", "https://fi.wikipedia.org/wiki/Foo_(bar)"],
+        ["Hei", "javascript:alert(1)"])
+    assert importer.find_urls("https://[broken\nhttp://") == ([], ["https://[broken", "http://"])
+    stats = ok(b.post("/api/bookmarks/paste", json={"text": pasted}))
+    assert stats == {"found": 3, "added": 3, "duplicates": 0, "invalid": 0, "over_limit": 0,
+                     "ignored_lines": 2, "ignored": ["Hei", "javascript:alert(1)"]}, stats
+    catalog = {i["url"]: i for i in ok(b.get("/api/bookmarks", params={"scope": "catalog", "q": "paste.example"}))["items"]}
+    assert catalog["https://www.paste.example/b"]["title"] == "https://www.paste.example/b"
+    again = ok(b.post("/api/bookmarks/paste", json={"text": pasted}))
+    assert again["added"] == 0 and again["duplicates"] == 3, again
+    assert ok(b.post("/api/bookmarks/paste", json={"text": "no addresses here"}))["added"] == 0
+
     # --- deleting containers ---
     ok(a.delete(f"/api/categories/{cat3}", params={"bookmarks": "catalog"}))
     assert search("example 2", scope="catalog") == {b1}
@@ -276,7 +292,7 @@ with TestClient(app):  # runs startup (schema creation)
     # --- admin ---
     users = ok(a.get("/api/admin"))["users"]
     bob = next(u for u in users if u["username"] == "bob")
-    assert bob["bookmarks"] == 13
+    assert bob["bookmarks"] == 16  # 13 imported above, plus the 3 pasted links
     temp = ok(a.post(f"/api/admin/users/{bob['id']}/reset-password"))["password"]
     ok(b.get("/api/me"), 401)
     ok(b.post("/api/login", json={"username": "bob", "password": temp}))

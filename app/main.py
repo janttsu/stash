@@ -1519,6 +1519,42 @@ async def import_bookmarks(request: Request, mode: Literal["catalog", "tab", "st
     return await run_in_threadpool(do_import, c, text, mode, tab_name, folder_tags, skip_duplicates)
 
 
+class PastedText(BaseModel):
+    text: str = Field(max_length=200_000)
+
+
+@app.post("/api/bookmarks/paste")
+def paste_links(body: PastedText, c: Ctx = Depends(ctx)):
+    """Adds the web addresses in pasted text to the Catalog. Lines without an address are left out."""
+    con = c.con
+    urls, ignored = importer.find_urls(body.text)
+    room = MAX_BOOKMARKS - bookmark_count(con, c.uid)
+    if room <= 0:
+        raise err(422, "limit_reached")
+    have = {r[0] for r in con.execute("SELECT url FROM bookmarks WHERE user_id=?", (c.uid,))}
+    stats = {"found": len(urls), "added": 0, "duplicates": 0, "invalid": 0, "over_limit": 0,
+             "ignored_lines": len(ignored), "ignored": ignored[:20]}
+    new_ids: list[int] = []
+    with db.tx(con):
+        for raw_url in urls:
+            try:
+                url = clean_url(raw_url, guess=False)
+            except HTTPException:
+                stats["invalid"] += 1
+                continue
+            if url in have:
+                stats["duplicates"] += 1
+                continue
+            if stats["added"] >= room:
+                stats["over_limit"] += 1
+                continue
+            have.add(url)
+            new_ids.append(insert_bookmark(con, c.uid, url, url, "", [], None, 0, db.now()))
+            stats["added"] += 1
+        db.reindex(con, new_ids)
+    return stats
+
+
 @app.get("/api/export")
 def export_bookmarks(c: Ctx = Depends(ctx)):
     con = c.con

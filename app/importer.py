@@ -2,8 +2,14 @@
 from __future__ import annotations
 
 import html
+import re
 import time
 from html.parser import HTMLParser
+from urllib.parse import urlsplit
+
+# http(s) addresses and bare www. ones; an address ends at whitespace, quotes or angle brackets
+_ADDRESS = re.compile(r"(?:https?://|www\.)[^\s<>\"'`]+", re.IGNORECASE)
+_TRAILING = ".,;:!?*_"
 
 
 class NetscapeParser(HTMLParser):
@@ -80,6 +86,38 @@ def parse(text: str) -> list[dict]:
     parser.feed(text)
     parser.close()
     return parser.items
+
+
+def _has_host(url: str) -> bool:
+    try:
+        return bool(urlsplit(url).hostname)
+    except ValueError:  # e.g. an unmatched "[" in the host part
+        return False
+
+
+def find_urls(text: str) -> tuple[list[str], list[str]]:
+    """The web addresses in pasted text, in order and without repeats, and the lines that had none.
+
+    A line may hold one address or several, with any other words around them. Trailing punctuation
+    belongs to the sentence, not the address, unless the address has a matching closing bracket."""
+    urls: list[str] = []
+    ignored: list[str] = []
+    for line in text.splitlines():
+        found = []
+        for m in _ADDRESS.finditer(line):
+            url = m.group(0).rstrip(_TRAILING)
+            while url.endswith(")") and url.count(")") > url.count("("):
+                url = url[:-1]
+            if url[:4].lower() == "www.":
+                url = "https://" + url
+            if url not in found and _has_host(url):
+                found.append(url)
+        if not found and line.strip():
+            ignored.append(line.strip())
+        for url in found:
+            if url not in urls:
+                urls.append(url)
+    return urls, ignored
 
 
 def export(tabs: list[dict], catalog: list[dict], catalog_name: str = "Catalog") -> str:
