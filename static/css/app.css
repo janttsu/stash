@@ -395,6 +395,9 @@ img.fav { background: var(--fav-plate, transparent); }
 .settings { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
 .settings .card { display: flex; flex-direction: column; gap: 12px; }
 .settings h3 { margin-top: 6px; }
+.settings-nav { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.settings-group { display: flex; flex-direction: column; gap: 12px; }
+.settings-group__title { font-size: 1.35rem; margin-top: 12px; scroll-margin-top: 12px; }
 .bookmarklet {
   display: inline-block; padding: 7px 16px; border-radius: 999px; background: var(--accent); color: var(--on-accent);
   font-weight: 700; text-decoration: none; cursor: grab; box-shadow: var(--shadow);
