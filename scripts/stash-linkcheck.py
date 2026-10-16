@@ -14,6 +14,10 @@ Tags: for every page that exists, the model also says which tags fit it, choosin
 change (undoable) that is applied without asking. Pages that could not be read ("unsure") are left alone, and
 --no-tags turns the tagging off.
 
+When a page has been checked, Stash stores the time with the bookmark (checked_at). The next run takes the pages
+checked longest ago first, so --limit goes on through the whole collection instead of checking the same pages
+again. This needs a key that can write; a read-only key still checks, but the times are not stored.
+
 Stash is used through its MCP endpoint (/mcp) with an API key: Settings → Assistant (MCP) → Create a key for a
 program, with "Allow changes" (a read-only key can check but not remove).
 
@@ -29,7 +33,8 @@ Use:
 
   stash-linkcheck.py                       check every bookmark, list the gone ones, ask, remove
   stash-linkcheck.py --tag video --tag music       only bookmarks with one of these tags
-  stash-linkcheck.py --host youtube.com --limit 50 only this site, at most 50
+  stash-linkcheck.py --limit 50            the 50 pages checked longest ago (never checked first)
+  stash-linkcheck.py --host youtube.com --limit 50 only this site, the 50 checked longest ago
   stash-linkcheck.py --resume              reuse the verdicts of the last report, check only the rest
   stash-linkcheck.py --no-delete           only report (tags are still put in order)
   stash-linkcheck.py --no-tags             do not touch tags
@@ -70,9 +75,22 @@ class Stash:
     """A minimal MCP client: JSON-RPC over HTTP to Stash's stateless /mcp endpoint."""
 
     def __init__(self, url: str, key: str):
-        self.endpoint = url.rstrip("/") + "/mcp"
+        self.url = url.rstrip("/")
+        self.endpoint = self.url + "/mcp"
         self.key = key
         self.n = 0
+
+    def mark_checked(self, ids: list[int]) -> None:
+        """Stores in Stash when these pages were checked, so a later run with --limit starts with the oldest."""
+        req = urllib.request.Request(self.url + "/api/v1/checked", data=json.dumps({"ids": ids}).encode(),
+                                     method="POST", headers={"Authorization": f"Bearer {self.key}",
+                                                             "Content-Type": "application/json",
+                                                             "User-Agent": "stash-linkcheck"})
+        try:
+            with urllib.request.urlopen(req, timeout=60):
+                pass
+        except (urllib.error.HTTPError, urllib.error.URLError) as e:
+            raise RuntimeError(f"not stored in Stash: {getattr(e, 'code', '') or e.reason}") from e
 
     def rpc(self, method: str, params: dict | None = None) -> dict:
         self.n += 1
@@ -432,7 +450,7 @@ def save_report(path: Path, checked: dict) -> None:
     tmp.replace(path)
 
 
-async def check_all(args, todo: list[dict], checked: dict, report: Path, vocabulary: list) -> None:
+async def check_all(args, todo: list[dict], checked: dict, report: Path, vocabulary: list, stash: Stash) -> None:
     from playwright.async_api import async_playwright
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -441,6 +459,7 @@ async def check_all(args, todo: list[dict], checked: dict, report: Path, vocabul
     model = asyncio.Semaphore(1)    # Ollama answers one at a time; the browser keeps reading pages meanwhile
     done = 0
     width = len(str(len(todo)))
+    warned = False
 
     async with async_playwright() as pw:
         browser = await launch(pw, args)
@@ -451,7 +470,7 @@ async def check_all(args, todo: list[dict], checked: dict, report: Path, vocabul
                                 if route.request.resource_type in ("image", "media", "font") else route.continue_())
 
         async def worker():
-            nonlocal done
+            nonlocal done, warned
             while not queue.empty():
                 b = queue.get_nowait()
                 seen = await visit(context, b["url"], args.timeout)
@@ -464,6 +483,12 @@ async def check_all(args, todo: list[dict], checked: dict, report: Path, vocabul
                                      "error": seen.get("error", ""), "checked_at": int(time.time())}
                 done += 1
                 save_report(report, checked)
+                try:
+                    await asyncio.to_thread(stash.mark_checked, [b["id"]])
+                except RuntimeError as e:
+                    if not warned:   # one warning is enough; the checks themselves go on
+                        print(f"Warning: {e}. Later runs cannot tell which pages were checked.", flush=True)
+                        warned = True
                 mark = {"exists": " ok  ", "gone": "GONE ", "unsure": " ?   "}[verdict["verdict"]]
                 shown = f"  [{', '.join(verdict['tags'])}]" if args.tags and verdict["tags"] else ""
                 print(f"[{done:>{width}}/{len(todo)}] {mark} #{b['id']} {b['url'][:70]}  {verdict['reason'][:70]}{shown}",
@@ -605,6 +630,8 @@ def main() -> None:
     known = {b["url"] for b in bookmarks}
     checked = {u: v for u, v in checked.items() if u in known}     # removed or changed since are dropped
     todo = [b for b in bookmarks if b["url"] not in checked]
+    # never checked first, then the ones checked longest ago, so --limit moves on through the whole collection
+    todo.sort(key=lambda b: b.get("checked_at") or 0)
     if args.limit:
         todo = todo[:args.limit]
     print(f"{len(bookmarks)} bookmarks; {len(todo)} to check"
@@ -613,7 +640,7 @@ def main() -> None:
 
     if todo:
         try:
-            asyncio.run(check_all(args, todo, checked, args.report, vocabulary))
+            asyncio.run(check_all(args, todo, checked, args.report, vocabulary, stash))
         except KeyboardInterrupt:
             print(f"\nStopped. What was checked is in {args.report}; --resume continues from there.")
             return

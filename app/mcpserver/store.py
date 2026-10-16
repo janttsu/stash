@@ -27,6 +27,7 @@ class Bookmark:
     created_at: int
     position: int = 0
     text: str = ""
+    checked_at: int | None = None   # last time a link check looked at the page
 
     @property
     def where(self) -> str:
@@ -84,7 +85,8 @@ class Store:
             bm = Bookmark(id=b["id"], url=b["url"], title=b["title"], notes=b.get("notes") or "",
                           host=b.get("host") or "", tags=list(b.get("tags") or []), tab=b.get("tab") or "",
                           category=b.get("category") or "", category_id=b.get("category_id"),
-                          created_at=b.get("created_at") or 0, position=b.get("position") or 0)
+                          created_at=b.get("created_at") or 0, position=b.get("position") or 0,
+                          checked_at=b.get("checked_at"))
             bm.text = "\n".join((bm.title, bm.url, bm.notes, " ".join(bm.tags), bm.tab, bm.category)).casefold()
             self.bookmarks[bm.id] = bm
         self.tabs = snap.get("tabs", [])
