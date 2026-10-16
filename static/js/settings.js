@@ -8,13 +8,28 @@ let root = null;
 export async function renderSettings(container) {
   root = container;
   root.className = 'view settings';
-  const cards = [appearance(), behaviour(), addButtons(), importExport(), apiKeys(), changeHistory(), browsingHistory(), linkCheck(), account()];
-  fill(root, h('h1', null, t('Settings')), ...cards);
+  const groups = [
+    group(t('Look and behaviour'), appearance(), behaviour(), addButtons()),
+    group(t('Bookmarks'), importExport(), linkCheck()),
+    group(t('Assistants and API'), apiKeys()),
+    group(t('History'), changeHistory(), browsingHistory()),
+    group(t('Account'), account()),
+  ];
+  let adminCard = null;
   if (state.user.is_admin) {
-    const adminCard = h('section', { class: 'card' }, h('h2', null, t('Users and registration')));
-    root.append(adminCard);
-    await drawAdmin(adminCard);
+    adminCard = h('section', { class: 'card' }, h('h2', null, t('Users and registration')));
+    groups.push(group(t('Administration'), adminCard));
   }
+  const nav = h('nav', { class: 'settings-nav' }, groups.map(({ title, el }) =>
+    h('button', { type: 'button', class: 'linklike', onclick: () => el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, title)));
+  fill(root, h('h1', null, t('Settings')), nav, ...groups.map((g) => g.el));
+  if (adminCard) await drawAdmin(adminCard);
+}
+
+// A titled block of cards; returns the title too, so the jump links can point at it.
+function group(title, ...cards) {
+  const el = h('section', { class: 'settings-group' }, h('h2', { class: 'settings-group__title' }, title), ...cards);
+  return { title, el };
 }
 
 async function save(patch) {
