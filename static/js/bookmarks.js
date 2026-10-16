@@ -485,7 +485,8 @@ export async function pasteLinksDialog() {
 }
 
 export async function importDialog() {
-  const file = h('input', { type: 'file', accept: '.html,.htm,text/html', required: true, class: 'input' });
+  const file = h('input', { type: 'file', accept: '.html,.htm,text/html', class: 'input' });
+  const pasted = h('textarea', { class: 'input paste-links', rows: 6, spellcheck: 'false', placeholder: 'https://' });
   const radio = (value, checked) => h('input', { type: 'radio', name: 'import-mode', value, checked });
   const toCatalog = radio('catalog', true);
   const toTab = radio('tab');
@@ -496,6 +497,8 @@ export async function importDialog() {
   const body = h('div', { class: 'form' },
     h('p', { class: 'muted' }, t('Choose the bookmarks HTML file exported from your browser or another bookmark manager.')),
     file,
+    h('label', { class: 'field' }, h('span', null, t('Or paste web addresses, one per line')), pasted),
+    h('p', { class: 'muted' }, t('Pasted addresses go straight to the Catalog. Lines without an address are ignored.')),
     h('label', { class: 'check' }, toCatalog, h('span', null, t('Into the Catalog'))),
     h('label', { class: 'check indent' }, folderTags, h('span', null, t('Turn folder names into tags'))),
     h('label', { class: 'check' }, toTab, h('span', null, t('Into one new Dashboard tab (each folder becomes a category)'))),
@@ -508,18 +511,30 @@ export async function importDialog() {
     {
       label: t('Import'), kind: 'primary',
       action: async () => {
-        if (!file.files[0]) return false;
-        const mode = toTab.checked ? 'tab' : toStructure.checked ? 'structure' : 'catalog';
-        const query = new URLSearchParams({
-          mode, tab_name: tabName.value.trim() || 'Imported', folder_tags: folderTags.checked, skip_duplicates: skip.checked,
-        });
-        return api('POST', `/api/import?${query}`, undefined, { raw: await file.files[0].text() });
+        if (!file.files[0] && !pasted.value.trim()) return false;
+        // a file and pasted addresses can both be used in one go; the totals are added up
+        const total = { imported: 0, duplicates: 0, skipped: 0, ignored: 0 };
+        if (file.files[0]) {
+          const mode = toTab.checked ? 'tab' : toStructure.checked ? 'structure' : 'catalog';
+          const query = new URLSearchParams({
+            mode, tab_name: tabName.value.trim() || 'Imported', folder_tags: folderTags.checked, skip_duplicates: skip.checked,
+          });
+          const s = await api('POST', `/api/import?${query}`, undefined, { raw: await file.files[0].text() });
+          total.imported += s.imported; total.duplicates += s.duplicates; total.skipped += s.skipped;
+        }
+        if (pasted.value.trim()) {
+          const s = await api('POST', '/api/bookmarks/paste', { text: pasted.value });
+          total.imported += s.added; total.duplicates += s.duplicates;
+          total.skipped += s.invalid + s.over_limit; total.ignored += s.ignored_lines;
+        }
+        return total;
       },
     },
   ]);
   if (!stats) return false;
   await openModal(t('Import finished'), h('ul', { class: 'plain' },
     h('li', null, t('{n} bookmarks imported', { n: stats.imported })),
+    stats.ignored > 0 && h('li', null, t('{n} lines had no web address and were ignored', { n: stats.ignored })),
     stats.duplicates > 0 && h('li', null, t('{n} skipped because you already had them', { n: stats.duplicates })),
     stats.skipped > 0 && h('li', null, t('{n} skipped (not web addresses, e.g. browser-internal links)', { n: stats.skipped }))), [
     { label: t('OK'), kind: 'primary', action: () => true },
