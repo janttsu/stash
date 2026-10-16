@@ -256,6 +256,8 @@ export const SV = {
   "Find dead links": "Hitta döda länkar",
   "Import bookmarks…": "Importera bokmärken…",
   "Import bookmarks": "Importera bokmärken",
+  "Or paste web addresses, one per line": "Eller klistra in webbadresser, en per rad",
+  "Pasted addresses go straight to the Catalog. Lines without an address are ignored.": "Inklistrade adresser läggs direkt i katalogen. Rader utan adress ignoreras.",
   "Look and behaviour": "Utseende och beteende",
   "Assistants and API": "Assistenter och API",
   "History": "Historik",

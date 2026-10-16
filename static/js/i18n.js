@@ -275,6 +275,8 @@ export const FI = {
   'Find dead links': 'Etsi kuolleet linkit',
   'Import bookmarks…': 'Tuo kirjanmerkkejä…',
   'Import bookmarks': 'Tuo kirjanmerkkejä',
+  'Or paste web addresses, one per line': 'Tai liitä verkko-osoitteet, yksi per rivi',
+  'Pasted addresses go straight to the Catalog. Lines without an address are ignored.': 'Liitetyt osoitteet menevät suoraan Katalogiin. Rivit ilman osoitetta ohitetaan.',
   'Look and behaviour': 'Ulkoasu ja toiminta',
   'Assistants and API': 'Avustajat ja rajapinta',
   'History': 'Historia',
