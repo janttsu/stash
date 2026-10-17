@@ -28,7 +28,7 @@ BIG_HEAD = b"<html><head><title>Big page</title></head>"
 
 
 def handler(request: httpx.Request) -> httpx.Response:
-    path = request.url.host + request.url.path
+    path = request.headers.get("host", request.url.host) + request.url.path   # connected by IP, named in Host
     if path == "site.example/tea":
         return httpx.Response(200, html="<head><title>Green tea \u2013 Teas</title><meta property='og:title' "
                                         "content='Green tea'></head>")

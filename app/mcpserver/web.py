@@ -16,7 +16,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlsplit
+from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -241,7 +241,8 @@ class Web:
             return False
         return self.allow_private or ip.is_global
 
-    def check_url(self, url: str) -> None:
+    def check_url(self, url: str) -> str:
+        """Vets the address and returns the IP to connect to, so that the name cannot change its mind."""
         p = urlsplit(url)
         if p.scheme not in ("http", "https") or not p.hostname:
             raise Blocked(f"only http(s) addresses can be read ({url[:80]})")
@@ -258,6 +259,19 @@ class Web:
             where = "this server" if any(ipaddress.ip_address(a.split('%')[0]).is_loopback for a in bad) \
                 else "the local network"
             raise Blocked(f"{p.hostname} is on {where}; not fetched")
+        return sorted(addrs)[0]
+
+    @staticmethod
+    def pinned(url: str, ip: str) -> tuple[str, dict, dict]:
+        """The request for url sent to ip: (target url, headers, extensions) with the real name in Host and SNI."""
+        p = urlsplit(url)
+        netloc = f"[{ip}]" if ":" in ip else ip
+        host_header = p.hostname
+        if p.port:
+            netloc += f":{p.port}"
+            host_header += f":{p.port}"
+        return (urlunsplit((p.scheme, netloc, p.path or "/", p.query, "")), {"Host": host_header},
+                {"sni_hostname": p.hostname})
 
     def fetch(self, url: str, *, body: bool = True, head_only: bool = False) -> Page:
         """head_only reads the page only up to </head> (titles, description), which is far less to download."""
@@ -271,8 +285,8 @@ class Web:
         try:
             with self._client() as client:
                 for _ in range(6):
-                    self.check_url(current)
-                    with client.stream("GET", current) as r:
+                    target, headers, ext = self.pinned(current, self.check_url(current))
+                    with client.stream("GET", target, headers=headers, extensions=ext) as r:
                         stream = r.extensions.get("network_stream")
                         peer = stream.get_extra_info("server_addr") if stream is not None else None
                         if peer and not self.allowed_ip(str(peer[0])):  # the name changed its address after the check
