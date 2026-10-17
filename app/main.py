@@ -449,12 +449,12 @@ def public_config(con=Depends(get_db)):
 @app.post("/api/register")
 def register(body: Register, request: Request, response: Response, con=Depends(get_db)):
     ip_key = f"reg:{client_ip(request)}"
-    if limiter.blocked(ip_key, 5, 3600):
+    if limiter.blocked(ip_key, 10, 3600):
         raise err(429, "too_many_attempts")
+    limiter.hit(ip_key)   # every attempt counts, not only the successful ones: no probing of invite codes or names
     username = body.username.strip()
     if not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", username):
         raise err(422, "bad_username")
-    pw_hash = security.hash_password(body.password)
     with db.tx(con):
         # The first account becomes the administrator. It goes through the same gate as everyone else
         # (by default an invitation from `python -m app.cli invite`), so a stranger cannot claim a fresh install.
@@ -467,6 +467,7 @@ def register(body: Register, request: Request, response: Response, con=Depends(g
                 raise err(403, "bad_invite")
         if con.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
             raise err(409, "username_taken")
+        pw_hash = security.hash_password(body.password)   # the slow part, only for a request that is otherwise fine
         uid = con.execute("INSERT INTO users(username, pw_hash, is_admin, created_at) VALUES(?,?,?,?)",
                           (username, pw_hash, int(first), db.now())).lastrowid
         if mode == "invite":
@@ -475,7 +476,6 @@ def register(body: Register, request: Request, response: Response, con=Depends(g
         tab_id = new_tab(con, uid, tab_name)
         new_category(con, uid, tab_id, cat_name)
         start_session(con, response, uid)
-    limiter.hit(ip_key)
     return {"ok": True}
 
 
@@ -499,7 +499,12 @@ def login(body: Login, request: Request, response: Response, con=Depends(get_db)
             for key in keys:
                 limiter.hit(key)
             raise err(401, "bad_totp")
-        con.execute("UPDATE users SET totp_last=? WHERE id=?", (counter, user["id"]))
+        # spent atomically: two sign-ins with the same code at the same moment cannot both get through
+        if not con.execute("UPDATE users SET totp_last=? WHERE id=? AND totp_last<?",
+                           (counter, user["id"], counter)).rowcount:
+            for key in keys:
+                limiter.hit(key)
+            raise err(401, "bad_totp")
     start_session(con, response, user["id"], body.remember)
     return {"ok": True}
 
@@ -1336,7 +1341,7 @@ async def deadlink_job(client, uid: int, tag: str, rows: list) -> None:
             try:
                 with db.tx(con):
                     # the bookmark may have been deleted while the job ran
-                    if con.execute("SELECT 1 FROM bookmarks WHERE id=?", (bookmark_id,)).fetchone():
+                    if con.execute("SELECT 1 FROM bookmarks WHERE id=? AND user_id=?", (bookmark_id, uid)).fetchone():
                         add_tags(con, [bookmark_id], [tag])
                         db.reindex(con, [bookmark_id])
             finally:
@@ -1397,10 +1402,25 @@ _favicon_sem = asyncio.Semaphore(6)
 _favicon_pending: dict[str, asyncio.Future] = {}
 
 
-def _favicon_known(host: str) -> bool:
+_ICON_HOST = re.compile(r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?")
+
+
+def icon_host_ok(host: str) -> bool:
+    """A host name that can be a file name under the icon cache (no '..', no slashes, nothing odd)."""
+    return bool(_ICON_HOST.fullmatch(host)) and ".." not in host
+
+
+def _favicon_wanted(host: str, token: Optional[str]) -> bool:
+    """Icons are fetched only for hosts the signed-in user has bookmarked: this must not become an open proxy,
+    and which hosts someone has bookmarked is not for others (or for visitors of a shared page) to find out."""
+    if not token:
+        return False
     con = db.connect()
     try:
-        return con.execute("SELECT 1 FROM bookmarks WHERE host=? LIMIT 1", (host,)).fetchone() is not None
+        return con.execute(
+            "SELECT 1 FROM sessions s JOIN bookmarks b ON b.user_id=s.user_id"
+            " WHERE s.token_hash=? AND s.expires_at>? AND b.host=? LIMIT 1",
+            (security.token_hash(token), db.now(), host)).fetchone() is not None
     finally:
         con.close()
 
@@ -1409,6 +1429,8 @@ async def refresh_favicon(client, host: str) -> str:
     """Fetch a site's icon again, ignoring the cache. A working icon is only replaced by a working new one.
 
     Returns new (a different icon was found), same, kept (none found, the old one stays) or missing."""
+    if not icon_host_ok(host):   # "..", "." and the like would point outside the cache
+        return "missing"
     try:
         data = await asyncio.wait_for(net.favicon(client, host), 20)
     except Exception:
@@ -1432,14 +1454,14 @@ async def refresh_favicon(client, host: str) -> str:
 async def favicon(host: str, request: Request):
     """Site icons are fetched once by the server and cached, so browsers never contact third parties."""
     host = host.lower()
-    if not re.fullmatch(r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?", host) or ".." in host:
+    if not icon_host_ok(host):
         raise err(404, "not_found")
     path = FAVICONS / host
     miss = Response(status_code=404, headers={"Cache-Control": "public, max-age=86400"})
     fresh = path.exists() and (path.stat().st_size > 0 or time.time() - path.stat().st_mtime < 7 * 86400)
     if not fresh:
-        # only for hosts someone has bookmarked: this must not become an open proxy
-        if not await run_in_threadpool(_favicon_known, host):
+        # only for hosts the signed-in user has bookmarked; signed out (a shared page) sees the cache only
+        if not await run_in_threadpool(_favicon_wanted, host, request.cookies.get(COOKIE)):
             raise err(404, "not_found")
         pending = _favicon_pending.get(host)
         if pending is None:

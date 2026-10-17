@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 
 from . import db, net
@@ -78,29 +79,32 @@ async def refresh_meta_batch(con, client, uids: list[int], limit: int = META_BAT
     counts = {"checked": 0, "titled": 0, "icons_new": 0}
     icons: dict[str, str] = {}
     for bid, url, title, host in due_meta(con, uids, limit):
-        if not url.lower().startswith(("http://", "https://")):
+        try:
+            if not url.lower().startswith(("http://", "https://")):
+                continue   # mailto:, tel:, …: nothing to fetch (meta_at is still set below)
+            counts["checked"] += 1
+            if looks_unnamed(title, url, host):
+                try:
+                    found = await net.page_title(client, url)
+                except net.FetchError:
+                    found = ""
+                if good_title(found):
+                    with db.tx(con):
+                        row = con.execute("SELECT url, title FROM bookmarks WHERE id=?", (bid,)).fetchone()
+                        # only if nothing changed meanwhile and the title is still unnamed
+                        if row and row["url"] == url and looks_unnamed(row["title"], url, host) \
+                                and found.strip()[:500] != row["title"]:
+                            con.execute("UPDATE bookmarks SET title=? WHERE id=?", (found.strip()[:500], bid))
+                            db.reindex(con, [bid])
+                            counts["titled"] += 1
+            if host not in icons:
+                icons[host] = await refresh_favicon(client, host)
+                if icons[host] == "new":
+                    counts["icons_new"] += 1
+        except Exception:   # one odd bookmark (a strange host, a crash in a parser) must not stop the rest
+            logging.getLogger("stash.maintenance").exception("upkeep of bookmark %s failed", bid)
+        finally:
             con.execute("UPDATE bookmarks SET meta_at=? WHERE id=?", (db.now(), bid))
-            continue
-        counts["checked"] += 1
-        if looks_unnamed(title, url, host):
-            try:
-                found = await net.page_title(client, url)
-            except net.FetchError:
-                found = ""
-            if good_title(found):
-                with db.tx(con):
-                    row = con.execute("SELECT url, title FROM bookmarks WHERE id=?", (bid,)).fetchone()
-                    # only if nothing changed meanwhile and the title is still unnamed
-                    if row and row["url"] == url and looks_unnamed(row["title"], url, host) \
-                            and found.strip()[:500] != row["title"]:
-                        con.execute("UPDATE bookmarks SET title=? WHERE id=?", (found.strip()[:500], bid))
-                        db.reindex(con, [bid])
-                        counts["titled"] += 1
-        if host not in icons:
-            icons[host] = await refresh_favicon(client, host)
-            if icons[host] == "new":
-                counts["icons_new"] += 1
-        con.execute("UPDATE bookmarks SET meta_at=? WHERE id=?", (db.now(), bid))
     if counts["icons_new"]:
         db.set_config(con, "favicon_rev", str(db.now()))
     return counts

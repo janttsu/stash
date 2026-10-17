@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from . import db, security
 from .main import (
     MAX_BOOKMARKS, Ctx, Filter, add_tags, bookmark_count, check_color, clean_text, clean_url, client_ip, ctx, err,
-    filter_sql, get_db, insert_bookmark, move_bookmarks, new_category, new_tab, next_position, norm_tag,
+    filter_sql, get_db, insert_bookmark, like_escape, move_bookmarks, new_category, new_tab, next_position, norm_tag,
     norm_tags, own, remove_tags, set_tags, tags_for, url_host,
 )
 from .main import refresh_favicon
@@ -122,7 +122,7 @@ def list_bookmarks(q: str = "", tags: str = "", mode: Literal["exact", "all", "a
     if host:
         host = host.lower().removeprefix("www.")
         where += " AND (b.host=? OR b.host=? OR b.host LIKE ? ESCAPE '\\')"
-        params += [host, "www." + host, "%." + host.replace("%", "\\%").replace("_", "\\_")]
+        params += [host, "www." + host, "%." + like_escape(host)]
     if ids:
         wanted = [int(x) for x in ids.split(",") if x.strip().isdigit()][:1000]
         where += f" AND b.id IN ({db.marks(len(wanted))})" if wanted else " AND 0"

@@ -50,6 +50,13 @@ with TestClient(app):  # runs startup (schema creation)
     ok(b.post("/api/register", json={"username": "Alice", "password": "bob password", "invite": code}), 409)
     ok(b.post("/api/register", json={"username": "bob", "password": "bob password", "invite": code}))
     ok(anon.post("/api/register", json={"username": "carol", "password": "carol password", "invite": code}), 403)
+    # failed attempts count as well (no guessing of invite codes or names): 10 an hour from one address
+    for _ in range(10):
+        if anon.post("/api/register", json={"username": "probe", "password": "probe password", "invite": "nope"}).status_code == 429:
+            break
+    else:
+        raise AssertionError("registration attempts are not limited")
+    security.limiter.reset("reg:testclient")
     assert not ok(b.get("/api/me"))["is_admin"]
     ok(b.get("/api/admin"), 403)
     ok(anon.post("/api/login", json={"username": "alice", "password": "wrong"}), 401)
