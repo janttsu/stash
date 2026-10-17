@@ -84,7 +84,7 @@ def item_json(row, tags, where) -> dict:
     tab, cat = where.get(row["category_id"], ("", "")) if row["category_id"] else ("", "")
     return {"id": row["id"], "url": row["url"], "title": row["title"], "notes": row["notes"], "host": row["host"],
             "tags": tags, "category_id": row["category_id"], "tab": tab, "category": cat, "position": row["position"],
-            "created_at": row["created_at"], "updated_at": row["updated_at"]}
+            "created_at": row["created_at"], "updated_at": row["updated_at"], "checked_at": row["checked_at"]}
 
 
 def structure(con, uid: int) -> list[dict]:
@@ -141,6 +141,21 @@ def snapshot_all(c: KeyCtx = Depends(key_ctx)):
     tag_map, where_map = tags_for(c.con, [r["id"] for r in rows]), locations(c.con, c.uid)
     return {"bookmarks": [item_json(r, tag_map.get(r["id"], []), where_map) for r in rows],
             "tabs": structure(c.con, c.uid), "tags": tag_counts(c.con, c.uid)}
+
+
+class Checked(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=1000)
+
+
+@v1.post("/checked")
+def mark_checked(body: Checked, c: KeyCtx = Depends(writer)):
+    """A link check looked at these bookmarks now. The time is kept (checked_at) so the next check can start
+    with the oldest. It is bookkeeping, not an edit: no changeset, nothing to undo, the page does not redraw."""
+    now = db.now()
+    with db.tx(c.con):
+        marked = sum(c.con.execute("UPDATE bookmarks SET checked_at=? WHERE id=? AND user_id=?",
+                                   (now, bid, c.uid)).rowcount for bid in dict.fromkeys(body.ids))
+    return {"marked": marked}
 
 
 @v1.get("/tags")

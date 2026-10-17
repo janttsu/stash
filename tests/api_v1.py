@@ -71,6 +71,17 @@ with TestClient(app):
     assert [t["name"] for t in snap["tabs"]][-1] == "Work"
     docs, blog, news = by_title["ACME docs"]["id"], by_title["ACME blog"]["id"], by_title["News"]["id"]
 
+    # --- when a link check looked at a page: stored, not a change ---
+    assert all(b["checked_at"] is None for b in snap["bookmarks"])
+    changes_before = ok(R.get("/api/v1/changes"))
+    ok(R.post("/api/v1/checked", json={"ids": [docs]}), 403)  # read-only key
+    assert ok(W.post("/api/v1/checked", json={"ids": [docs, docs, 999999]}))["marked"] == 1
+    back = {b["id"]: b for b in ok(R.get("/api/v1/snapshot"))["bookmarks"]}
+    assert back[docs]["checked_at"] and back[blog]["checked_at"] is None and back[news]["checked_at"] is None
+    assert ok(R.get("/api/v1/bookmarks", params={"ids": str(docs)}))["items"][0]["checked_at"] == back[docs]["checked_at"]
+    assert ok(R.get("/api/v1/changes")) == changes_before, "checking is not a change: no changeset, nothing to undo"
+    ok(W.post("/api/v1/checked", json={"ids": []}), 422)
+
     # --- reading ---
     assert ok(R.get("/api/v1/bookmarks", params={"host": "acme.example"}))["total"] == 2
     assert ok(R.get("/api/v1/bookmarks", params={"q": "acme blog"}))["total"] == 1
