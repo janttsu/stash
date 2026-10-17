@@ -69,7 +69,9 @@ function behaviour() {
     checkField(t('Auto-tag when moving to the Catalog'), 'auto_tag_catalog',
       t('The tab and category names are added as tags, so the bookmark stays easy to find.')),
     checkField(t('Keep bookmarks tidy automatically'), 'auto_maintain',
-      t('Stash checks now and then by itself: missing titles get the real page title, and site icons are fetched again.')));
+      t('Stash checks now and then by itself: missing titles get the real page title, and site icons are fetched again.')),
+    checkField(t('Fade bookmarks I have not used in a while'), 'fade',
+      t('On the Dashboard a bookmark pales slowly when you have not opened it for a month, and is at its palest after two years. Opening it brings the colour back. Visits in the synced browsing history count as use too.')));
 }
 
 function addButtons() {

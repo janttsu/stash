@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app import cli, db, importer, net, security  # noqa: E402
 from app import main as main_module  # noqa: E402
 from app.main import app, loose_url  # noqa: E402
+from app import history  # noqa: E402  (after main: it is loaded by main)
 
 H = {"X-Stash": "1"}
 
@@ -148,6 +149,25 @@ with TestClient(app):  # runs startup (schema creation)
     ok(b.delete(f"/api/bookmarks/{b1}"))
     assert search("example 2") == {b1} and search("ref") == set()
     ok(a.post(f"/api/categories/{cat2}/order", json={"ids": [b1, b2]}))
+    # --- last use, for the fading on the Dashboard: added, then opened here, then seen in the browsing history ---
+    first = {i["id"]: i for i in ok(a.get("/api/dashboard"))["bookmarks"]}
+    some = next(iter(first.values()))
+    assert some["last_use"] == some["created_at"], "a new bookmark counts as used the day it was added"
+    con = db.connect()
+    con.execute("UPDATE bookmarks SET created_at=1 WHERE id=?", (some["id"],))
+    assert {i["id"]: i for i in ok(a.get("/api/dashboard"))["bookmarks"]}[some["id"]]["last_use"] == 1
+    ok(b.post(f"/api/bookmarks/{some['id']}/used"), 404)   # not bob's
+    rev = con.execute("SELECT rev FROM users WHERE id=1").fetchone()[0]
+    ok(a.post(f"/api/bookmarks/{some['id']}/used"))
+    assert con.execute("SELECT rev FROM users WHERE id=1").fetchone()[0] == rev, "opening is not a change: no redraw"
+    assert {i["id"]: i for i in ok(a.get("/api/dashboard"))["bookmarks"]}[some["id"]]["last_use"] >= time.time() - 5
+    con.execute("UPDATE bookmarks SET used_at=NULL WHERE id=?", (some["id"],))
+    con.execute("INSERT INTO history(user_id, source, url, url_key, last_visit) VALUES(?,?,?,?,?)",
+                (1, "test", some["url"], history.url_key(some["url"]), 1700000000))
+    assert {i["id"]: i for i in ok(a.get("/api/dashboard"))["bookmarks"]}[some["id"]]["last_use"] == 1700000000
+    con.execute("DELETE FROM history WHERE source='test'")
+    con.close()
+
     moved = {i["id"]: i for i in ok(a.get("/api/dashboard"))["bookmarks"]}
     assert moved[b1]["category_id"] == cat2 and (moved[b1]["position"], moved[b2]["position"]) == (0, 1)
     ok(b.post(f"/api/categories/{cat2}/order", json={"ids": [b1]}), 404)

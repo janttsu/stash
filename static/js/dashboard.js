@@ -1,6 +1,6 @@
 // Dashboard: tabs → category groups in columns → bookmarks. Everything is drag-and-drop sortable.
 import {
-  api, attempt, colorRow, confirmBox, copyText, favicon, fill, h, icon, linkAttrs, loadDash, mailBookmarks, offerUndo,
+  api, attempt, colorRow, confirmBox, copyText, favicon, fill, fmtDate, h, icon, linkAttrs, loadDash, mailBookmarks, offerUndo,
   openModal, promptBox, showMenu, state, toast,
 } from './core.js';
 import { t } from './i18n.js';
@@ -372,7 +372,7 @@ async function openAll(bookmarks) {
   for (const b of bookmarks) {
     // opened without the "noopener" feature so that a blocked pop-up is detectable (null)
     const win = window.open(linkAttrs(b.url).href, '_blank');
-    if (win) win.opener = null;
+    if (win) { win.opener = null; used(b, document.querySelector(`.bm[data-id="${b.id}"]`)); }
     else blocked += 1;
   }
   if (blocked) toast(t('Your browser blocked some pop-ups. Allow pop-ups for this site.'), 'error');
@@ -382,17 +382,44 @@ async function openAll(bookmarks) {
 
 function tooltip(b) {
   if (!state.user.settings.tooltips) return b.url;
-  return [b.url, b.tags.length ? `${t('Tags')}: ${b.tags.join(', ')}` : '', b.notes].filter(Boolean).join('\n');
+  const used = state.user.settings.fade && b.last_use ? `${t('Last used')}: ${fmtDate(b.last_use)}` : '';
+  return [b.url, b.tags.length ? `${t('Tags')}: ${b.tags.join(', ')}` : '', b.notes, used].filter(Boolean).join('\n');
+}
+
+// Bookmarks fade with disuse: full colour up to a month after the last use (a click here, a visit in the synced
+// browsing history, or the day it was added), then down to a third of it by two years. Opening one brings it back.
+const FADE_START = 30 * 86400;
+const FADE_END = 730 * 86400;
+const FADE_MIN = 0.35;
+
+function fadeOf(b) {
+  if (!state.user.settings.fade || !b.last_use) return 1;
+  const idle = Date.now() / 1000 - b.last_use;
+  if (idle <= FADE_START) return 1;
+  return Math.max(FADE_MIN, 1 - (1 - FADE_MIN) * (idle - FADE_START) / (FADE_END - FADE_START));
+}
+
+/** The bookmark was opened from here: tell the server (bookkeeping, no redraw) and show it at full colour. */
+function used(b, el) {
+  b.last_use = Math.floor(Date.now() / 1000);
+  if (el) { el.style.setProperty('--fade', 1); el.querySelector('.bm__link').title = tooltip(b); }
+  api('POST', `/api/bookmarks/${b.id}/used`).catch(() => {});
 }
 
 function bookmarkEl(b) {
-  return h('li', { class: `bm c-${b.color || 'none'}`, dataset: { id: b.id }, oncontextmenu: (e) => bookmarkMenu(e, b) },
+  const el = h('li', { class: `bm c-${b.color || 'none'}`, dataset: { id: b.id }, oncontextmenu: (e) => bookmarkMenu(e, b) },
     favicon(b.url, state.user.settings.favicons),
-    h('a', { class: 'bm__link', title: tooltip(b), draggable: false, ...linkAttrs(b.url) }, b.title),
+    h('a', {
+      class: 'bm__link', title: tooltip(b), draggable: false, ...linkAttrs(b.url),
+      onclick: () => used(b, el), onauxclick: (e) => { if (e.button === 1) used(b, el); },
+    }, b.title),
     h('button', {
       type: 'button', class: 'iconbtn bm__menu', title: t('Menu'), 'aria-label': t('Menu'),
       onclick: (e) => bookmarkMenu(e.currentTarget, b),
     }, icon('menu')));
+  const fade = fadeOf(b);
+  if (fade < 1) el.style.setProperty('--fade', fade.toFixed(2));
+  return el;
 }
 
 async function addBookmark(categoryId) {
@@ -402,7 +429,7 @@ async function addBookmark(categoryId) {
 function bookmarkMenu(at, b) {
   showMenu(at, [
     { label: t('Edit'), action: async () => { if (await bookmarkDialog(b)) await refresh(); } },
-    { label: t('Open in new tab'), action: () => window.open(linkAttrs(b.url).href, '_blank', 'noopener') },
+    { label: t('Open in new tab'), action: () => { used(b, document.querySelector(`.bm[data-id="${b.id}"]`)); window.open(linkAttrs(b.url).href, '_blank', 'noopener'); } },
     { label: t('Copy link'), action: () => copyText(b.url) },
     { label: t('Send by email'), action: () => mailBookmarks([b]) },
     { heading: t('Color') },
