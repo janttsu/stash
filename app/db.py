@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     dead        INTEGER NOT NULL DEFAULT 0,
     dead_streak INTEGER NOT NULL DEFAULT 0,
     checked_at  INTEGER,
-    meta_at     INTEGER
+    meta_at     INTEGER,
+    used_at     INTEGER
 );
 CREATE INDEX IF NOT EXISTS bookmarks_user ON bookmarks(user_id, created_at);
 CREATE INDEX IF NOT EXISTS bookmarks_cat ON bookmarks(category_id, position);
@@ -244,7 +245,8 @@ def init() -> None:
         # columns added after the first release: add them to databases that predate them
         have = {r[1] for r in con.execute("PRAGMA table_info(bookmarks)")}
         for name, decl in (("dead", "INTEGER NOT NULL DEFAULT 0"), ("dead_streak", "INTEGER NOT NULL DEFAULT 0"),
-                           ("checked_at", "INTEGER"), ("meta_at", "INTEGER")):
+                           ("checked_at", "INTEGER"), ("meta_at", "INTEGER"),
+                           ("used_at", "INTEGER")):
             if name not in have:
                 con.execute(f"ALTER TABLE bookmarks ADD COLUMN {name} {decl}")
         if "rev" not in {r[1] for r in con.execute("PRAGMA table_info(users)")}:
