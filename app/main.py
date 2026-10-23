@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, importer, net, security
+from . import db, importer, mailer, net, security
 from .security import limiter
 
 BASE = Path(__file__).resolve().parent.parent
@@ -180,7 +180,7 @@ def client_ip(request: Request) -> str:
 
 def user_json(c: Ctx) -> dict:
     return {"id": c.uid, "username": c.user["username"], "is_admin": bool(c.user["is_admin"]),
-            "totp_on": bool(c.user["totp_on"]), "settings": c.settings,
+            "totp_on": bool(c.user["totp_on"]), "email": c.user["email"], "settings": c.settings,
             "favicon_rev": db.get_config(c.con, "favicon_rev", "")}
 
 
@@ -421,11 +421,38 @@ def extension_zip():
 FIRST_TAB = {"en": ("Home", "Favorites"), "fi": ("Koti", "Suosikit"), "sv": ("Hem", "Favoriter")}
 
 
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+RESET_TTL = 3600     # a password reset link works for an hour and only once
+
+
+def clean_email(value: str) -> str:
+    address = value.strip()
+    if not EMAIL_RE.fullmatch(address) or len(address) > 254:
+        raise err(422, "bad_email")
+    return address
+
+
 class Register(BaseModel):
     username: str
     password: str = Field(min_length=8, max_length=200)
+    email: str = Field("", max_length=254)   # optional: only needed to reset the password by e-mail
     invite: str = ""
     lang: str = "en"
+
+
+class Forgot(BaseModel):
+    email: str = Field(max_length=254)
+    lang: str = Field("en", max_length=5)
+
+
+class ResetPassword(BaseModel):
+    token: str = Field(max_length=200)
+    password: str = Field(min_length=8, max_length=200)
+
+
+class EmailChange(BaseModel):
+    password: str = Field(max_length=200)
+    email: str = Field(max_length=254)
 
 
 class Login(BaseModel):
@@ -455,6 +482,7 @@ def register(body: Register, request: Request, response: Response, con=Depends(g
     username = body.username.strip()
     if not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", username):
         raise err(422, "bad_username")
+    address = clean_email(body.email) if body.email.strip() else ""
     with db.tx(con):
         # The first account becomes the administrator. It goes through the same gate as everyone else
         # (by default an invitation from `python -m app.cli invite`), so a stranger cannot claim a fresh install.
@@ -467,9 +495,11 @@ def register(body: Register, request: Request, response: Response, con=Depends(g
                 raise err(403, "bad_invite")
         if con.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
             raise err(409, "username_taken")
+        if address and con.execute("SELECT 1 FROM users WHERE email=? COLLATE NOCASE", (address,)).fetchone():
+            raise err(409, "email_taken")
         pw_hash = security.hash_password(body.password)   # the slow part, only for a request that is otherwise fine
-        uid = con.execute("INSERT INTO users(username, pw_hash, is_admin, created_at) VALUES(?,?,?,?)",
-                          (username, pw_hash, int(first), db.now())).lastrowid
+        uid = con.execute("INSERT INTO users(username, pw_hash, is_admin, created_at, email) VALUES(?,?,?,?,?)",
+                          (username, pw_hash, int(first), db.now(), address)).lastrowid
         if mode == "invite":
             con.execute("UPDATE invites SET used_by=?, used_at=? WHERE code=?", (uid, db.now(), body.invite))
         tab_name, cat_name = FIRST_TAB.get(body.lang, FIRST_TAB["en"])
@@ -609,6 +639,57 @@ def change_password(body: PasswordChange, request: Request, c: Ctx = Depends(ctx
     with db.tx(c.con):
         c.con.execute("UPDATE users SET pw_hash=? WHERE id=?", (security.hash_password(body.new), c.uid))
         c.con.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?", (c.uid, keep))
+    return {"ok": True}
+
+
+@app.post("/api/account/email")
+def change_email(body: EmailChange, c: Ctx = Depends(ctx)):
+    require_password(c, body.password)
+    address = clean_email(body.email) if body.email.strip() else ""   # empty removes it
+    if address and c.con.execute("SELECT 1 FROM users WHERE id<>? AND email<>'' AND email=? COLLATE NOCASE",
+                                 (c.uid, address)).fetchone():
+        raise err(409, "email_taken")
+    c.con.execute("UPDATE users SET email=? WHERE id=?", (address, c.uid))
+    return {"ok": True}
+
+
+@app.post("/api/password/forgot")
+def forgot_password(body: Forgot, request: Request, con=Depends(get_db)):
+    """Mail a reset link to the address of an account. The answer is the same whether or not it exists."""
+    address = body.email.strip().lower()
+    keys = (f"forgot:{client_ip(request)}", f"forgot-address:{address}")
+    if limiter.blocked(keys[0], 10, 3600) or limiter.blocked(keys[1], 3, 3600):
+        raise err(429, "too_many_attempts")
+    for key in keys:
+        limiter.hit(key)
+    user = con.execute("SELECT id, email FROM users WHERE email<>'' AND email=? COLLATE NOCASE", (address,)).fetchone()
+    if user:
+        token, now = security.new_token(), db.now()
+        with db.tx(con):
+            con.execute("DELETE FROM password_resets WHERE user_id=?", (user["id"],))
+            con.execute("INSERT INTO password_resets(token_hash, user_id, created_at, expires_at) VALUES(?,?,?,?)",
+                        (security.token_hash(token), user["id"], now, now + RESET_TTL))
+        link = f"{ORIGIN}/#reset={token}"
+        mailer.send(mailer.reset_message(user["email"], body.lang, link), user["email"])
+    return {"ok": True}
+
+
+@app.post("/api/password/reset")
+def reset_password(body: ResetPassword, request: Request, con=Depends(get_db)):
+    """Set a new password with the link from the e-mail. Signs the account out everywhere; two-factor stays on."""
+    key = f"reset:{client_ip(request)}"
+    if limiter.blocked(key, 20, 3600):
+        raise err(429, "too_many_attempts")
+    limiter.hit(key)
+    pw_hash = security.hash_password(body.password)
+    with db.tx(con):
+        row = con.execute("SELECT user_id, expires_at FROM password_resets WHERE token_hash=?",
+                          (security.token_hash(body.token.strip()),)).fetchone()
+        if not row or row["expires_at"] < db.now():
+            raise err(400, "bad_reset_link")
+        con.execute("DELETE FROM password_resets WHERE user_id=?", (row["user_id"],))
+        con.execute("UPDATE users SET pw_hash=? WHERE id=?", (pw_hash, row["user_id"]))
+        con.execute("DELETE FROM sessions WHERE user_id=?", (row["user_id"],))
     return {"ok": True}
 
 

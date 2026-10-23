@@ -381,7 +381,14 @@ function account() {
   const draw = () => fill(card,
     h('h2', null, t('Account')),
     h('p', null, t('Signed in as'), ' ', h('strong', null, state.user.username)),
+    h('p', null, t('E-mail address'), ': ', state.user.email
+      ? h('strong', null, state.user.email)
+      : h('span', { class: 'muted' }, t('none yet'))),
+    h('p', { class: 'muted small' }, state.user.email
+      ? t('Used only for password reset links.')
+      : t('Add an address so that you can reset your password by e-mail.')),
     h('div', { class: 'row wrap' },
+      h('button', { type: 'button', class: 'btn', onclick: () => changeEmail(draw) }, t('Change e-mail address')),
       h('button', { type: 'button', class: 'btn', onclick: changePassword }, t('Change password')),
       state.user.totp_on
         ? h('button', { type: 'button', class: 'btn', onclick: () => disableTotp(draw) }, t('Turn off two-factor authentication'))
@@ -420,6 +427,31 @@ async function changePassword() {
     },
   ]);
   if (ok) toast(t('Password changed. Other devices were signed out.'));
+}
+
+async function changeEmail(redraw) {
+  const password = passwordInput('current-password');
+  const address = h('input', {
+    type: 'email', class: 'input', maxLength: 254, autocomplete: 'email', value: state.user.email || '',
+  });
+  const ok = await openModal(t('Change e-mail address'), h('div', { class: 'form' },
+    h('label', { class: 'field' }, h('span', null, t('E-mail address')), address),
+    h('p', { class: 'muted small' }, t('Leave it empty to remove it. Without an address you cannot reset your password by e-mail.')),
+    h('label', { class: 'field' }, h('span', null, t('Confirm with your password')), password)), [
+    { label: t('Cancel') },
+    {
+      label: t('Save'), kind: 'primary',
+      action: async () => {
+        await api('POST', '/api/account/email', { password: password.value, email: address.value });
+        state.user.email = address.value.trim();
+        return true;
+      },
+    },
+  ]);
+  if (ok) {
+    toast(t('Saved.'));
+    redraw();
+  }
 }
 
 async function enableTotp(redraw) {
