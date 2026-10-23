@@ -63,6 +63,7 @@ without handing it to anyone.
 | `app/security.py` | Passwords (scrypt), sessions, TOTP, rate limiting |
 | `app/api_v1.py` | `/api/v1` for API keys, plus managing keys and the change history |
 | `app/history.py` | Browsing history sent by devices: upload, visit counts for bookmarks, search |
+| `app/mailer.py` | E-mail from the server: password reset links, signed with DKIM |
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
 | `app/mcpserver/` | The MCP endpoint `/mcp`: its tools, named result sets, previews and page reading |
 | `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
@@ -312,6 +313,23 @@ The key comes from Settings → Assistant (MCP) → Create a key for a program, 
 can check and list but not remove). The verdicts are saved in `~/.cache/stash/linkcheck-report.json`;
 `--resume` reuses them and checks only the rest, `--no-delete` only skips the removal (tags are still put in order), `--no-tags` skips the tagging, `--show-browser` shows the window.
 
+## Accounts, e-mail and password reset
+
+- **Registration** asks for an e-mail address, which is optional. Nothing is verified with a link: the address is
+  only used to send password reset links. Each account can set, change or remove it in Settings → Account, with
+  its password.
+- **"Forgot your password?"** on the sign-in page mails a link that works for one hour and only once. Choosing a
+  new password signs out every device. Two-factor authentication stays on: after a reset, signing in still asks
+  for the code from the authenticator app.
+- **Without an address** a password can still be reset by an administrator (`python -m app.cli reset-password
+  <user>`, which also turns two-factor off, as before).
+- **Setting an address** for an account from the server: `python -m app.cli set-email <user> <address>`
+  (`-` removes it). Each address belongs to one account.
+- **Sending**: the server sends the mail itself, directly to the recipient's mail server (port 25, signed with
+  DKIM). Run `.venv/bin/python -m app.cli mail-dns` once: it prints the SPF and DKIM records for the sender's
+  domain (`STASH_MAIL_FROM`, by default `Stash <noreply@stash.soderlund.in>`). Add them at your DNS provider;
+  without them some providers refuse the mail. `STASH_MAIL=dry` writes the mail to `data/outbox/` instead.
+
 ## Tests
 
 ```sh
@@ -319,6 +337,7 @@ can check and list but not remove). The verdicts are saved in `~/.cache/stash/li
 .venv/bin/python tests/api_v1.py   # API keys, /api/v1, previews and undo
 .venv/bin/python tests/history.py  # the sync script against a fake Firefox profile, the history API, ordering
 .venv/bin/python tests/trash.py    # the trash: every way of deleting, restoring, the 30-day limit
+.venv/bin/python tests/account.py  # e-mail addresses, password reset links (once, one hour), two-factor after a reset
 .venv/bin/python tests/maintenance.py  # the background upkeep of titles and icons
 .venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end (pip install pytest)
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/

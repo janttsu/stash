@@ -22,7 +22,14 @@ CREATE TABLE IF NOT EXISTS users (
     totp_last   INTEGER NOT NULL DEFAULT 0,
     settings    TEXT NOT NULL DEFAULT '{}',
     created_at  INTEGER NOT NULL,
-    rev         INTEGER NOT NULL DEFAULT 0
+    rev         INTEGER NOT NULL DEFAULT 0,
+    email       TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -255,6 +262,10 @@ def init() -> None:
         con.executescript(TRASH_TRIGGERS)
         if "remember" not in {r[1] for r in con.execute("PRAGMA table_info(sessions)")}:
             con.execute("ALTER TABLE sessions ADD COLUMN remember INTEGER NOT NULL DEFAULT 1")
+        if "email" not in {r[1] for r in con.execute("PRAGMA table_info(users)")}:
+            con.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
+        # one address, one account (case does not matter); accounts without an address are not compared
+        con.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(email COLLATE NOCASE) WHERE email <> ''")
         # these indexes reference the columns added just above, so they come after the migration
         con.execute("CREATE INDEX IF NOT EXISTS bookmarks_checked ON bookmarks(checked_at)")
         con.execute("CREATE INDEX IF NOT EXISTS bookmarks_meta ON bookmarks(meta_at)")

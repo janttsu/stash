@@ -2,7 +2,7 @@
 //   node tests/ui.mjs     (starts its own server on port 8013 with an empty database; screenshots land in data/tmp/)
 // Fails on any console error, uncaught exception or CSP violation.
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
 const BASE = 'http://127.0.0.1:8013';
 const OUT = new URL('../data/tmp/', import.meta.url).pathname;
@@ -14,7 +14,7 @@ rmSync(`${OUT}chrome`, { recursive: true, force: true });
 rmSync(`${OUT}ui-db`, { recursive: true, force: true });
 const root = new URL('..', import.meta.url).pathname;
 const server = spawn(`${root}.venv/bin/uvicorn`, ['app.main:app', '--host', '127.0.0.1', '--port', new URL(BASE).port, '--log-level', 'warning'], {
-  cwd: root, stdio: 'inherit', env: { ...process.env, STASH_DATA: `${OUT}ui-db`, STASH_INSECURE_COOKIE: '1', STASH_ORIGIN: BASE },
+  cwd: root, stdio: 'inherit', env: { ...process.env, STASH_DATA: `${OUT}ui-db`, STASH_INSECURE_COOKIE: '1', STASH_ORIGIN: BASE, STASH_MAIL: 'dry' },
 });
 const chrome = spawn('chromium', ['--headless=new', '--no-sandbox', '--disable-gpu', `--remote-debugging-port=${PORT}`,
   `--user-data-dir=${OUT}chrome`, '--window-size=1280,900', '--lang=en-US', 'about:blank'], { stdio: 'ignore' });
@@ -125,9 +125,42 @@ try {
   await shot('01-register');
   await js(`${HELPERS}
     const inputs = document.querySelectorAll('.auth input');
-    $fill(inputs[0], 'tester'); $fill(inputs[1], 'test password'); $fill(inputs[2], 'test password');
+    $fill(inputs[0], 'tester'); $fill(inputs[1], 'tester@example.com');
+    const passwords = document.querySelectorAll('.auth input[type=password]');
+    $fill(passwords[0], 'test password'); $fill(passwords[1], 'test password');
     document.querySelector('.auth form').requestSubmit();`);
   await waitFor('.tabsbar', 'dashboard after registration');
+
+  // --- forgotten password: ask for a link, follow it from the e-mail, sign in with the new password ---
+  await js(`${HELPERS}
+    await $api('POST', '/api/logout');`);
+  await goto('/');
+  await waitFor('.auth form');
+  await js(`[...document.querySelectorAll('.auth button.linklike')].find((b) => /Forgot your password/.test(b.textContent)).click()`);
+  await waitFor('.auth input[type=email]', 'the reset request form');
+  check(await js(`return document.querySelectorAll('.auth input[type=password]').length`) === 0, 'the reset request has no password field');
+  await js(`${HELPERS}
+    $fill('.auth input[type=email]', 'tester@example.com');
+    document.querySelector('.auth form').requestSubmit();`);
+  await waitFor('.auth .muted.center', 'the notice after asking');
+  for (let i = 0; i < 50 && !(await js(`return document.querySelector('.auth').innerText.includes('on its way')`)); i++) await sleep(100);
+  check(await js(`return document.querySelector('.auth').innerText.includes('on its way')`), 'the notice says a link is on its way');
+  const outbox = `${OUT}ui-db/outbox`;
+  const mail = readdirSync(outbox).filter((f) => f.endsWith('.eml')).sort().pop();
+  const token = readFileSync(`${outbox}/${mail}`, 'utf8').match(/#reset=([\w-]+)/)[1];
+  await goto('/#reset=' + token);
+  for (let i = 0; i < 50 && !(await js(`return document.querySelector('.auth').innerText.includes('Choose a new password')`)); i++) await sleep(100);
+  check(await js(`return document.querySelector('.auth').innerText.includes('Choose a new password')`), 'the link opens the reset form');
+  await js(`${HELPERS}
+    const pw = document.querySelectorAll('.auth input[type=password]');
+    $fill(pw[0], 'new test password'); $fill(pw[1], 'new test password');
+    document.querySelector('.auth form').requestSubmit();`);
+  for (let i = 0; i < 50 && !(await js(`return document.querySelector('.auth').innerText.includes('is changed')`)); i++) await sleep(100);
+  check(await js(`return location.hash === ''`), 'the reset link is removed from the address bar');
+  check(await js(`${HELPERS} return (await $api('POST', '/api/login', { username: 'tester', password: 'new test password' })).ok === true`),
+    'the new password signs in');
+  await goto('/');
+  await waitFor('.tabsbar', 'dashboard after the password reset');
 
   // --- seed data through the API, as the signed-in user ---
   await js(`${HELPERS}

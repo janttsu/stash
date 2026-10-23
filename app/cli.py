@@ -4,12 +4,17 @@
   users                       list accounts
   reset-password <username>   set a new random password (also turns off 2FA, signs the user out)
   make-admin <username>       grant administrator rights
+  set-email <username> <address>
+                              the address for password reset links ("-" removes it)
+  mail-dns                    the DNS records the sending domain needs (SPF and DKIM) for the mail of reset links
   registration <open|invite|closed>
                               who can create an account (ignored while STASH_REGISTRATION is set)
 """
 from __future__ import annotations
 
 import os
+import re
+import sqlite3
 import sys
 
 from . import db, security
@@ -38,6 +43,27 @@ def main(argv: list[str]) -> int:
                 return 1
             con.execute("DELETE FROM sessions WHERE user_id=(SELECT id FROM users WHERE username=?)", (args[0],))
         print(f"new password for {args[0]}: {password}")
+    elif cmd == "set-email" and len(args) == 2:
+        address = "" if args[1] == "-" else args[1].strip()
+        if address and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", address):
+            print("not an e-mail address", file=sys.stderr)
+            return 1
+        try:
+            if not con.execute("UPDATE users SET email=? WHERE username=?", (address, args[0])).rowcount:
+                print("no such user", file=sys.stderr)
+                return 1
+        except sqlite3.IntegrityError:
+            print("another account already has this address", file=sys.stderr)
+            return 1
+        print(f"{args[0]}: {address or 'no address'}")
+    elif cmd == "mail-dns":
+        from . import mailer
+        name, value = mailer.dkim_dns_record()
+        domain = mailer.from_domain()
+        print(f"Records for {domain} (the host name is relative to the zone of {domain}):\n")
+        print(f"SPF    TXT  {domain}  v=spf1 ip4:<this server's public IPv4> -all")
+        print(f"DKIM   TXT  {name}  {value}")
+        print(f"DMARC  TXT  _dmarc.{domain}  v=DMARC1; p=none; rua=mailto:<your address>")
     elif cmd == "make-admin" and len(args) == 1:
         if not con.execute("UPDATE users SET is_admin=1 WHERE username=?", (args[0],)).rowcount:
             print("no such user", file=sys.stderr)
