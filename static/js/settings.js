@@ -97,8 +97,11 @@ function addButtons() {
       h('input', { type: 'text', class: 'input mono', readOnly: true, value: mobile, onfocus: (e) => e.target.select() }),
       h('button', { type: 'button', class: 'btn', onclick: () => copyText(mobile) }, t('Copy'))),
     h('h3', null, t('Browser extension')),
-    h('p', null, t('The extension adds a toolbar button, a right-click “Add link to Stash” item and “Bookmark all open tabs”. Download and unzip it, then in Chrome, Edge or Brave open the Extensions page, turn on Developer mode and choose “Load unpacked”. In Firefox use about:debugging → “Load Temporary Add-on”.')),
-    h('p', null, h('a', { class: 'btn', href: '/extension.zip', download: '' }, t('Download extension'))));
+    h('p', null, t('The extension adds a toolbar button, a right-click “Add link to Stash” item, “Bookmark all open tabs” and “Send all open tabs to Stash”. Chrome, Edge or Brave: download and unzip it, open the Extensions page, turn on Developer mode and choose “Load unpacked”.')),
+    h('p', null, t('Firefox installs only signed add-ons for good and reports an unsigned one as “corrupt”. To try it out, open about:debugging → This Firefox → “Load Temporary Add-on” and pick manifest.json from the unzipped folder (it is gone when Firefox restarts). For a permanent install, the extension is signed once with a Mozilla add-ons account, as the README explains; after that the .xpi below installs in any Firefox.')),
+    h('div', { class: 'row' },
+      h('a', { class: 'btn', href: '/extension.zip', download: '' }, t('Download extension')),
+      h('a', { class: 'btn', href: '/extension.xpi', download: '' }, t('Download for Firefox (.xpi)'))));
 }
 
 function importExport() {

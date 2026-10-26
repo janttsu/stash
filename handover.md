@@ -80,7 +80,9 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
 - **Dashboard "bookmarks fade with disuse"** was added and then reverted on request; the `used_at` column it
   added may still exist in older databases and is unused.
 - The browser extension zip is built by the server from `extension/` on each download; after changing the
-  extension users must download and reinstall it.
+  extension users must download and reinstall it, and `"version"` in `extension/manifest.json` goes up.
+  Release Firefox only installs it signed: `/extension.xpi` serves `data/stash-extension.xpi` when the owner has
+  signed one on AMO (README, *Browser extension*), otherwise an unsigned xpi. No signed file exists yet.
 
 ## Next steps that were discussed or seem likely
 

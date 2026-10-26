@@ -120,6 +120,33 @@ While the variable is set, the setting in Settings → Users and registration is
 Environment variables: `STASH_ORIGIN` (public address), `STASH_DATA` (data directory, default `./data`),
 `STASH_REGISTRATION` (see above), `STASH_MAINTENANCE` (`off` turns the background upkeep off; see below).
 
+## Browser extension
+
+Settings → Add-to-Stash buttons → **Download extension** gives a zip of `extension/` with this server's address
+written into it. It adds a toolbar button, a right-click *Add link to Stash*, *Bookmark all open tabs* and
+*Send all open tabs to Stash* (to Open tabs, every window at once).
+
+- **Chrome, Edge, Brave**: unzip, open the Extensions page, turn on Developer mode, *Load unpacked*, choose the
+  folder.
+- **Firefox** installs only add-ons signed by Mozilla for good; an unsigned one is reported as "corrupt" even
+  though the file is fine. To try it, `about:debugging` → *This Firefox* → *Load Temporary Add-on* → the
+  `manifest.json` of the unzipped folder (it disappears when Firefox restarts). For a permanent install, sign it
+  once as a self-distributed ("unlisted") add-on; this needs a free account at addons.mozilla.org and its API
+  keys (Tools → Manage API Keys), and Node on any computer:
+
+  ```sh
+  curl -o stash-extension.zip https://stash.example.com/extension.zip && unzip -q stash-extension.zip
+  npx web-ext sign --source-dir stash-extension --channel unlisted --api-key <JWT issuer> --api-secret <JWT secret>
+  # → web-ext-artifacts/…-1.2.0.xpi: install it in Firefox (File → Open, or drag it in), and put it on the
+  #   server as data/stash-extension.xpi so that /extension.xpi (Settings → "Download for Firefox") serves it
+  ```
+
+  Every changed version of the extension needs a higher `"version"` in `extension/manifest.json` and a new
+  signing. If AMO says the add-on id is taken, change `browser_specific_settings.gecko.id` in the manifest to
+  one of your own before signing. Without a signed file, `/extension.xpi` serves an unsigned one, which Firefox
+  Developer Edition, Nightly and ESR accept after `xpinstall.signatures.required` is set to false in
+  `about:config`.
+
 ## Backups
 
 `scripts/backup.sh` writes a consistent, zstd-compressed copy of the whole database (every account's bookmarks,

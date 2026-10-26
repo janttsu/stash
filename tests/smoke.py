@@ -337,6 +337,10 @@ with TestClient(app):  # runs startup (schema creation)
     assert z.status_code == 200 and z.content[:2] == b"PK"
     names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
     assert {f"stash-extension/_locales/{lang}/messages.json" for lang in ("en", "fi", "sv")} <= set(names), names
+    x = anon.get("/extension.xpi")   # for Firefox: manifest.json at the root
+    assert x.status_code == 200 and x.headers["content-type"].startswith("application/x-xpinstall")
+    xnames = set(zipfile.ZipFile(io.BytesIO(x.content)).namelist())
+    assert {"manifest.json", "background.js", "config.js", "_locales/fi/messages.json"} <= xnames, xnames
     ok(anon.get("/favicon/localhost"), 404)
     ok(anon.get("/favicon/..%2f..%2fetc"), 404)
 

@@ -402,17 +402,35 @@ def site_icon():
     return FileResponse(STATIC / "icon.svg", media_type="image/svg+xml")
 
 
-@app.get("/extension.zip", include_in_schema=False)
-def extension_zip():
+def extension_archive(prefix: str) -> bytes:
+    """The extension as a zip, with config.js holding this server's address. prefix="stash-extension/" unzips
+    into a folder (Chrome's "Load unpacked"); "" puts manifest.json at the root, as a Firefox .xpi needs."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         root = BASE / "extension"
         for f in sorted(root.rglob("*")):  # includes _locales/<lang>/messages.json
             if f.is_file() and f.name != "config.js":
-                z.write(f, f"stash-extension/{f.relative_to(root).as_posix()}")
-        z.writestr("stash-extension/config.js", f"const STASH_ORIGIN = {json.dumps(ORIGIN)};\n")
-    return Response(buf.getvalue(), media_type="application/zip",
+                z.write(f, f"{prefix}{f.relative_to(root).as_posix()}")
+        z.writestr(f"{prefix}config.js", f"const STASH_ORIGIN = {json.dumps(ORIGIN)};\n")
+    return buf.getvalue()
+
+
+@app.get("/extension.zip", include_in_schema=False)
+def extension_zip():
+    return Response(extension_archive("stash-extension/"), media_type="application/zip",
                     headers={"Content-Disposition": 'attachment; filename="stash-extension.zip"'})
+
+
+@app.get("/extension.xpi", include_in_schema=False)
+def extension_xpi():
+    """For Firefox. A release Firefox installs only add-ons signed by Mozilla: once the extension has been signed
+    (see the README) and the signed file put at data/stash-extension.xpi, that file is served here; until then an
+    unsigned one, which Firefox Developer Edition, Nightly and ESR accept with xpinstall.signatures.required=false."""
+    signed = db.DATA / "stash-extension.xpi"
+    headers = {"Content-Disposition": 'attachment; filename="stash-extension.xpi"'}
+    if signed.is_file():
+        return FileResponse(signed, media_type="application/x-xpinstall", headers=headers)
+    return Response(extension_archive(""), media_type="application/x-xpinstall", headers=headers)
 
 
 # --- auth --------------------------------------------------------------------
