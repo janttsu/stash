@@ -150,7 +150,7 @@ export function assistantCard() {
     });
     fill(card,
       h('h2', null, t('Assistant (MCP)')),
-      h('p', null, t('Connect Stash to an AI assistant such as Claude Code, Qwen Code or Gemini CLI, and ask in your own words: “move everything about company X to the tag Y”, “which links are dead?”. The assistant shows exactly what would change and changes nothing until you agree. Every change can be undone below.')),
+      h('p', null, t('Connect Stash to an AI assistant such as Claude Code, Crush, Qwen Code or Gemini CLI, and ask in your own words: “move everything about company X to the tag Y”, “which links are dead?”. The assistant shows exactly what would change and changes nothing until you agree. Every change can be undone below.')),
       h('div', { class: 'field' }, h('span', null, t('Address for MCP clients')), h('div', { class: 'row' },
         h('input', { type: 'text', class: 'input mono', readOnly: true, value: url, onfocus: (e) => e.target.select() }),
         h('button', { type: 'button', class: 'btn', onclick: () => copyText(url) }, t('Copy')))),
@@ -159,7 +159,7 @@ export function assistantCard() {
       h('h3', null, t('How to use it')),
       h('ol', { class: 'steps' },
         h('li', null, t('Press “Connect an assistant”, choose the assistant you use and copy the text Stash shows. It contains a new key, so copy it before closing the window.')),
-        h('li', null, t('Claude Code: run the copied command in a terminal. Qwen Code and Gemini CLI: add the copied lines to the settings file named in the window. Then start the assistant again.')),
+        h('li', null, t('Claude Code: run the copied command in a terminal. Qwen Code, Gemini CLI and Crush: add the copied lines to the file named in the window. Then start the assistant again.')),
         h('li', null, t('Ask in your own words. The assistant starts by looking at your tabs, categories and tags, then finds the bookmarks the request is about.')),
         h('li', null, t('Before anything changes, the assistant shows exactly what would change. Say yes to apply it. Changed your mind afterwards? Ask it to undo the last change, or undo it below under “Changes made with API keys”. Deleted bookmarks also wait 30 days in the trash.'))),
       h('p', { class: 'muted' }, t('Things to ask:')),
@@ -219,6 +219,7 @@ const CLIENTS = {
   claude: { name: 'Claude Code', how: (url, key) => [t('Run this in a terminal:'), `claude mcp add --transport http stash ${url} --header "Authorization: Bearer ${key}"`] },
   qwen: { name: 'Qwen Code', how: (url, key) => [t('Add this to {file}:', { file: '~/.qwen/settings.json' }), mcpJson(url, key)] },
   gemini: { name: 'Gemini CLI', how: (url, key) => [t('Add this to {file}:', { file: '~/.gemini/settings.json' }), mcpJson(url, key)] },
+  crush: { name: 'Crush', how: (url, key) => [t('Add this to {file}:', { file: '~/.config/crush/crushrc' }), `mcp add stash --type http --url ${url} --header Authorization "Bearer ${key}"`] },
   other: { name: t('Other'), how: (url, key) => [t('Use the address and send the key in the Authorization header:'), `${url}\nAuthorization: Bearer ${key}`] },
 };
 

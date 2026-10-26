@@ -1,7 +1,7 @@
 # Stash
 
 A self-hosted bookmark manager you can use in the browser, from other computers through an API, and in
-plain language from AI assistants such as Qwen Code or Claude Code through its MCP server.
+plain language from AI assistants such as Claude Code, Crush or Qwen Code through its MCP server.
 
 ![The Dashboard: tabs, coloured categories in columns, bookmarks with site icons](docs/screenshots/dashboard.png)
 
@@ -41,7 +41,7 @@ without handing it to anyone.
      browser's language).
    - **API** (`/api/v1`) with API keys: all bookmarks at once, search, and changes with exact previews.
      Every change can be undone.
-2. **An MCP endpoint** (`/mcp`, in `app/mcpserver/`) for AI assistants such as Claude Code, Qwen Code and
+2. **An MCP endpoint** (`/mcp`, in `app/mcpserver/`) for AI assistants such as Claude Code, Crush, Qwen Code and
    Gemini CLI. You ask in plain language ("move everything about company X to tag Y", "check whether these
    links still work"); the assistant studies the bookmarks with Stash's tools, can read web pages and your
    browsing history, and previews every change as an exact dry run. Nothing changes until you agree to the
@@ -193,6 +193,11 @@ claude mcp add --transport http stash https://stash.example.com/mcp --header "Au
                              "headers": { "Authorization": "Bearer stash_…" } } } }
 ```
 
+```sh
+# Crush (~/.config/crush/crushrc, or .crushrc in a project)
+mcp add stash --type http --url https://stash.example.com/mcp --header Authorization "Bearer stash_…"
+```
+
 Then ask, for example "which bookmarks about Python have no tags? suggest tags for them".
 
 | Tool | What it does |
@@ -230,8 +235,9 @@ A key's sets and previews are kept in memory for an hour after its last use, so 
 
 A browser with two hundred open tabs is hard to close: some of them are things left unfinished. **Open tabs**
 in the top bar keeps them. Send them with the extension (its toolbar button's menu → *Send all open tabs to
-Stash*, every window at once) or paste their addresses (Open tabs → *Paste a list…*; in Firefox, select all
-tabs with Ctrl+Shift+A, Ctrl+A and copy their links), then close them in the browser. Every sending is a list,
+Stash*, every window at once) or paste their addresses (Open tabs → *Paste a list…*; without the extension,
+Firefox can bookmark all tabs into a folder with Ctrl+Shift+D, and copying that folder's bookmarks in the
+Library, Ctrl+Shift+O, Ctrl+A, Ctrl+C, gives their addresses one per line), then close them in the browser. Every sending is a list,
 and each tab in it is *open* (still to look at), *saved* (now a bookmark), *done* or *dropped*. A tab whose
 address is already bookmarked is marked saved at once.
 

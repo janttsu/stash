@@ -120,7 +120,7 @@ async function pasteDialog() {
   const name = h('input', { type: 'text', maxlength: 100, placeholder: t('e.g. laptop, Firefox') });
   const text = h('textarea', { rows: 10, placeholder: 'https://…\nhttps://…' });
   const sent = await openModal(t('Paste a list of tabs'), h('div', { class: 'form' },
-    h('p', { class: 'muted' }, t('One address per line, or any text with addresses in it. In Firefox, select all tabs (Ctrl+Shift+A, Ctrl+A) and copy their links; the extension can also send them.')),
+    h('p', { class: 'muted' }, t('One address per line, or any text with addresses in it. The easiest way is the extension’s menu “Send all open tabs to Stash”. Without it, in Firefox: press Ctrl+Shift+D to bookmark all tabs into a folder, open the Library (Ctrl+Shift+O), select that folder’s bookmarks (Ctrl+A), copy (Ctrl+C) and paste them here.')),
     h('label', { class: 'field' }, h('span', null, t('Name of this list')), name),
     h('label', { class: 'field' }, h('span', null, t('Addresses')), text)), [
     { label: t('Cancel') },

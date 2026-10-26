@@ -1,4 +1,4 @@
-"""Stash as a remote MCP server: https://<your stash>/mcp, for Claude Code, Qwen Code, Gemini CLI and other MCP clients.
+"""Stash as a remote MCP server: https://<your stash>/mcp, for Claude Code, Crush, Qwen Code, Gemini CLI and other MCP clients.
 
 Streamable HTTP, stateless, JSON answers. Every request carries an API key from AI → Assistant (MCP)
 (`Authorization: Bearer stash_…`); the key decides whose bookmarks the tools see and whether they may change
