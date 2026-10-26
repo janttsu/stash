@@ -1,12 +1,18 @@
 """E-mail from Stash: the password reset link, and nothing else.
 
 Mail goes straight from this server to the recipient's mail server (port 25, STARTTLS when offered), signed with
-DKIM (key data/dkim.key, selector "stash"). The domain of STASH_MAIL_FROM needs the SPF and DKIM records that
-`python -m app.cli mail-dns` prints; without them some providers refuse the mail.
+DKIM. The domain of STASH_MAIL_FROM needs the SPF and DKIM records that `python -m app.cli mail-dns` prints;
+without them some providers refuse the mail.
 
   STASH_MAIL=dry       write the messages to data/outbox/ instead of sending them (tests, or no outgoing port 25)
-  STASH_MAIL_FROM      the sender (default "Stash <noreply@stash.example.org>")
-  STASH_MAIL_HELO      the name this server introduces itself with (default mail.example.org)
+  STASH_MAIL_FROM      the sender (default "Stash <noreply@HOST>", HOST being the host name of STASH_ORIGIN)
+  STASH_MAIL_HELO      the name this server introduces itself with (default the host name of STASH_ORIGIN)
+  STASH_DKIM_KEY       the private DKIM key, PEM (default data/dkim.key, created on first use)
+  STASH_DKIM_SELECTOR  the DKIM selector (default "stash")
+
+Another program on the same server that already sends mail with DKIM can be reused: point STASH_DKIM_KEY and
+STASH_DKIM_SELECTOR at its key and selector and STASH_MAIL_FROM at an address of its domain, and no new DNS
+records are needed.
 """
 from __future__ import annotations
 
@@ -20,15 +26,19 @@ import threading
 import time
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import db
 
 log = logging.getLogger(__name__)
 
 DRY = os.environ.get("STASH_MAIL", "").strip().lower() == "dry"
-FROM = os.environ.get("STASH_MAIL_FROM", "").strip() or "Stash <noreply@stash.example.org>"
-HELO = os.environ.get("STASH_MAIL_HELO", "").strip() or "mail.example.org"
-SELECTOR = "stash"
+HOST = urlsplit(os.environ.get("STASH_ORIGIN", "")).hostname or "localhost"
+FROM = os.environ.get("STASH_MAIL_FROM", "").strip() or f"Stash <noreply@{HOST}>"
+HELO = os.environ.get("STASH_MAIL_HELO", "").strip() or HOST
+DKIM_KEY = os.environ.get("STASH_DKIM_KEY", "").strip()
+SELECTOR = os.environ.get("STASH_DKIM_SELECTOR", "").strip() or "stash"
 RETRY_SECONDS = (60, 300)     # after a failed delivery: try again after one minute, then after five
 
 TEXTS = {
@@ -48,12 +58,13 @@ TEXTS = {
 
 
 def dkim_key_path():
-    return db.DATA / "dkim.key"
+    return Path(DKIM_KEY) if DKIM_KEY else db.DATA / "dkim.key"
 
 
 def dkim_private_key() -> bytes:
     p = dkim_key_path()
-    if not p.exists():
+    # a key given with STASH_DKIM_KEY belongs to someone else: a new one in its place would not match the DNS
+    if not p.exists() and not DKIM_KEY:
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
 

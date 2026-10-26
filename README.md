@@ -327,8 +327,15 @@ can check and list but not remove). The verdicts are saved in `~/.cache/stash/li
   (`-` removes it). Each address belongs to one account.
 - **Sending**: the server sends the mail itself, directly to the recipient's mail server (port 25, signed with
   DKIM). Run `.venv/bin/python -m app.cli mail-dns` once: it prints the SPF and DKIM records for the sender's
-  domain (`STASH_MAIL_FROM`, by default `Stash <noreply@stash.example.org>`). Add them at your DNS provider;
-  without them some providers refuse the mail. `STASH_MAIL=dry` writes the mail to `data/outbox/` instead.
+  domain (`STASH_MAIL_FROM`, by default `Stash <noreply@HOST>` where HOST is the host name of `STASH_ORIGIN`).
+  Add them at your DNS provider; without them some providers refuse the mail. `STASH_MAIL=dry` writes the mail
+  to `data/outbox/` instead.
+- **Settings** (environment): `STASH_MAIL_FROM` (sender), `STASH_MAIL_HELO` (the name the server introduces
+  itself with, default the host of `STASH_ORIGIN`), `STASH_DKIM_KEY` (private key, default `data/dkim.key`,
+  created on first use) and `STASH_DKIM_SELECTOR` (default `stash`).
+- **Sharing another program's mail setup**: if something else on the server already sends DKIM-signed mail,
+  point `STASH_DKIM_KEY` and `STASH_DKIM_SELECTOR` at its key and selector and `STASH_MAIL_FROM` at an address
+  of its domain. Its SPF and DKIM records then cover Stash too, and no new DNS records are needed.
 
 ## Tests
 
