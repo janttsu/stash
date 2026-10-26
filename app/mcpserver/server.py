@@ -61,6 +61,18 @@ OPERATIONS for preview_changes (each acts on a "set", or on "ids": [..]):
   {"op": "update_titles", "set": "S9"}                   page titles found by refresh_titles
 The ops run in order in one transaction.
 
+PLAYLISTS: the user's Spotify and YouTube playlists are copied into Stash (Playlists in the top bar). Work on
+the copy: `playlists_overview`, `playlist_show`, then `playlist_edit` with ops, which are pending until
+`playlist_push` writes them to the service. Show the user what will change and wait for their consent before
+pushing; `playlist_discard` drops pending changes. Items are referred to by their #item ids from playlist_show;
+new items by address or id. Moving an item between playlists is a remove in one and an add in the other.
+  {"op": "add", "items": ["https://…", "id"], "position": 0}   at the end when position is left out
+  {"op": "remove", "ids": [12, 13]}        {"op": "move", "id": 12, "position": 0}
+  {"op": "order", "ids": [15, 12, 13]}     these first in this order, the rest keep their order after them
+  {"op": "rename", "name": "…", "description": "…", "public": false}
+A YouTube push costs about 50 quota units per added, removed or moved item (10 000 a day by default), so keep
+big reorders for Spotify or do them in parts.
+
 OPEN TABS: the user can send a browser's open tabs to Stash (Open tabs in the top bar) to empty the browser and
 sort the tabs out later. `open_tabs_overview` and `open_tabs_list` show them; `open_tabs_save` makes bookmarks
 of the ones worth keeping (an undoable change), `open_tabs_resolve` marks the rest done or dropped, or leaves a
@@ -299,6 +311,45 @@ def build_server(origin: str) -> FastMCP:
         """The saved handovers: each project with its latest version, when it was updated, and which assistant
         on which machine wrote it."""
         return await run(ctx, "handover_list")
+
+    @mcp.tool()
+    async def playlists_overview(ctx: Context) -> str:
+        """The connected music services and every playlist fetched into Stash (P1, P2, …) with its size and
+        pending changes."""
+        return await run(ctx, "playlists_overview")
+
+    @mcp.tool()
+    async def playlist_show(ctx: Context, playlist_id: int, offset: int = 0, limit: int = 200) -> str:
+        """The items of a playlist in order (#item id, position, title — artist (length), [added]/[removed]/[moved])."""
+        return await run(ctx, "playlist_show", playlist_id, offset, limit)
+
+    @mcp.tool()
+    async def playlist_edit(ctx: Context, playlist_id: int,
+                            ops: Annotated[list[dict], Field(description="see the instructions: add, remove, move, order, rename")]) -> str:
+        """Pending changes to a playlist in Stash. Nothing on Spotify or YouTube changes until playlist_push."""
+        return await run(ctx, "playlist_edit", playlist_id, ops)
+
+    @mcp.tool()
+    async def playlist_push(ctx: Context, playlist_id: int) -> str:
+        """Write the pending changes to the service so its playlist matches Stash. Only after the user agrees."""
+        return await run(ctx, "playlist_push", playlist_id)
+
+    @mcp.tool()
+    async def playlist_discard(ctx: Context, playlist_id: int) -> str:
+        """Drop the pending changes of a playlist and fetch it again from the service."""
+        return await run(ctx, "playlist_discard", playlist_id)
+
+    @mcp.tool()
+    async def playlists_sync(ctx: Context, service: Literal["spotify", "youtube"], force: bool = False) -> str:
+        """Fetch every playlist of a service into Stash. Playlists with pending changes are left alone unless
+        force=true, which drops those changes."""
+        return await run(ctx, "playlists_sync", service, force)
+
+    @mcp.tool()
+    async def playlist_create(ctx: Context, service: Literal["spotify", "youtube"], name: str, description: str = "",
+                              public: bool = False) -> str:
+        """A new empty playlist on the service (made at once), fetched into Stash."""
+        return await run(ctx, "playlist_create", service, name, description, public)
 
     @mcp.tool()
     async def open_tabs_overview(ctx: Context) -> str:

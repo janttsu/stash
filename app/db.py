@@ -213,6 +213,56 @@ CREATE TABLE IF NOT EXISTS open_tabs (
 );
 CREATE INDEX IF NOT EXISTS open_tabs_list ON open_tabs(list_id, position);
 CREATE INDEX IF NOT EXISTS open_tabs_user ON open_tabs(user_id, state);
+-- playlists from Spotify and YouTube (app/playlists.py): the connected account per service, every playlist
+-- with its items as they are on the service, and local edits (added, removed, moved) waiting to be pushed
+CREATE TABLE IF NOT EXISTS playlist_accounts (
+    id            INTEGER PRIMARY KEY,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service       TEXT NOT NULL,
+    client_id     TEXT NOT NULL DEFAULT '',
+    client_secret TEXT NOT NULL DEFAULT '',
+    access_token  TEXT NOT NULL DEFAULT '',
+    refresh_token TEXT NOT NULL DEFAULT '',
+    expires_at    INTEGER NOT NULL DEFAULT 0,
+    oauth_state   TEXT NOT NULL DEFAULT '',
+    external_id   TEXT NOT NULL DEFAULT '',
+    display_name  TEXT NOT NULL DEFAULT '',
+    synced_at     INTEGER,
+    created_at    INTEGER NOT NULL,
+    UNIQUE (user_id, service)
+);
+CREATE TABLE IF NOT EXISTS playlists (
+    id           INTEGER PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service      TEXT NOT NULL,
+    external_id  TEXT NOT NULL,
+    name         TEXT NOT NULL DEFAULT '',
+    description  TEXT NOT NULL DEFAULT '',
+    public       INTEGER NOT NULL DEFAULT 0,
+    editable     INTEGER NOT NULL DEFAULT 1,
+    owner        TEXT NOT NULL DEFAULT '',
+    remote_count INTEGER NOT NULL DEFAULT 0,
+    snapshot     TEXT NOT NULL DEFAULT '',
+    synced_at    INTEGER,
+    dirty        INTEGER NOT NULL DEFAULT 0,
+    gone         INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (user_id, service, external_id)
+);
+CREATE TABLE IF NOT EXISTS playlist_items (
+    id              INTEGER PRIMARY KEY,
+    playlist_id     INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    position        INTEGER NOT NULL DEFAULT 0,
+    remote_position INTEGER,
+    item_id         TEXT NOT NULL,
+    remote_id       TEXT NOT NULL DEFAULT '',
+    title           TEXT NOT NULL DEFAULT '',
+    artist          TEXT NOT NULL DEFAULT '',
+    duration_ms     INTEGER NOT NULL DEFAULT 0,
+    url             TEXT NOT NULL DEFAULT '',
+    added_at        INTEGER,
+    state           TEXT NOT NULL DEFAULT 'synced'
+);
+CREATE INDEX IF NOT EXISTS playlist_items_pl ON playlist_items(playlist_id, position);
 CREATE TABLE IF NOT EXISTS handover_versions (
     id          INTEGER PRIMARY KEY,
     handover_id INTEGER NOT NULL REFERENCES handovers(id) ON DELETE CASCADE,

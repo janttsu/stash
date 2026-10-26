@@ -276,6 +276,34 @@ img.fav { background: var(--fav-plate, transparent); }
 .tabs__text { flex: 1; min-width: 0; }
 .tabs__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .tabs__buttons { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.pl__card { max-width: 1200px; margin: 0 auto; }
+.pl__accounts { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.pl__account { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.pl__account .row { gap: 8px; flex-wrap: wrap; align-items: center; }
+.pl__columns { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 16px; margin-top: 16px; }
+@media (max-width: 800px) { .pl__columns { grid-template-columns: 1fr; } }
+.pl__lists { display: flex; flex-direction: column; gap: 4px; }
+.pl__list { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; cursor: pointer; }
+.pl__list.active { border-color: var(--accent); background: var(--surface-2); }
+.pl__badge { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.pl__badge--spotify { color: #1db954; }
+.pl__badge--youtube { color: #e53935; }
+.pl__pending { color: var(--accent); font-weight: 600; font-size: 12px; }
+.pl__detail { min-width: 0; }
+.pl__actions { gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.pl__items { margin-top: 8px; }
+.pl__item { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); }
+.pl__item--added { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.pl__item--removed .pl__title { color: var(--muted); text-decoration: line-through; }
+.pl__item--moved .pl__pos { color: var(--accent); font-weight: 600; }
+.pl__handle { cursor: grab; color: var(--muted); user-select: none; }
+.pl__pos { min-width: 2.5em; text-align: right; }
+.pl__text { flex: 1; min-width: 0; }
+.pl__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pl__guide ol { padding-left: 20px; margin: 0 0 10px; }
+.pl__guide li { margin-bottom: 6px; }
+.pl__guide .row { gap: 8px; align-items: center; flex-wrap: wrap; }
+.pl__uri { padding: 2px 6px; border-radius: 6px; background: var(--surface-2); overflow-wrap: anywhere; }
 .handover__card { max-width: 900px; margin: 0 auto; }
 .handover__list { margin-top: 14px; }
 .handover__item { padding: 10px 0; border-top: 1px solid var(--border); }

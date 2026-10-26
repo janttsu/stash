@@ -1686,9 +1686,10 @@ app.include_router(history.v1)    # before api_v1: /api/v1/history/... must not 
 app.include_router(history.session_api)
 app.include_router(api_v1.v1)
 app.include_router(api_v1.session_api)
-from . import handover, tabs  # noqa: E402
+from . import handover, playlists, tabs  # noqa: E402
 app.include_router(handover.session_api)
 app.include_router(tabs.session_api)
+app.include_router(playlists.session_api)
 
 HISTORY_SCRIPT = BASE / "scripts" / "stash-history-sync.py"
 SCRIPTS = {p.name: p for p in (HISTORY_SCRIPT, BASE / "scripts" / "stash-linkcheck.py")}

@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from .. import main  # noqa: F401  (first: main, api_v1 and history import each other)
-from .. import api_v1, db, handover, history, tabs  # noqa: E402,I001
+from .. import api_v1, db, handover, history, playlists, tabs  # noqa: E402,I001
 from ..api_v1 import KeyCtx
 
 MAX_OPS = 20_000   # one preview may touch many bookmarks (e.g. new titles for a whole set)
@@ -104,6 +104,39 @@ class LocalAPI:
             self._writer(c)
             return tabs.mark_saved(c, ids, note)
         return self._call(run)
+
+    # --- playlists from Spotify and YouTube (app/playlists.py) ------------------------------------------
+
+    def _playlist_call(self, fn, *, write: bool):
+        def run(c: KeyCtx):
+            if write:
+                self._writer(c)
+            try:
+                return fn(c)
+            except playlists.ServiceError as e:
+                raise StashError(502, f"{e.service} answered {e.status}: {e.message}") from e
+        return self._call(run)
+
+    def playlists_overview(self) -> dict:
+        return self._playlist_call(playlists.overview, write=False)
+
+    def playlist_show(self, playlist_id: int, offset: int = 0, limit: int = 500) -> dict:
+        return self._playlist_call(lambda c: playlists.show(c, playlist_id, offset, limit), write=False)
+
+    def playlist_edit(self, playlist_id: int, ops: list[dict]) -> dict:
+        return self._playlist_call(lambda c: playlists.edit(c, playlist_id, ops), write=True)
+
+    def playlist_discard(self, playlist_id: int) -> dict:
+        return self._playlist_call(lambda c: playlists.discard(c, playlist_id), write=True)
+
+    def playlist_push(self, playlist_id: int) -> dict:
+        return self._playlist_call(lambda c: playlists.push(c, playlist_id), write=True)
+
+    def playlists_sync(self, service: str, force: bool = False) -> dict:
+        return self._playlist_call(lambda c: playlists.pull(c, service, None, force), write=True)
+
+    def playlist_create(self, service: str, name: str, description: str = "", public: bool = False) -> dict:
+        return self._playlist_call(lambda c: playlists.create(c, service, name, description, public), write=True)
 
     # --- changing -------------------------------------------------------------------------------------
 

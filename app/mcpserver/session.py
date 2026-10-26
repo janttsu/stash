@@ -439,6 +439,70 @@ class Session:
                                    expected_version=expected_version, git_commit=git_commit)
         return f"Saved {r['project']} as version {r['version']}."
 
+    # --- playlists from Spotify and YouTube ----------------------------------------------------
+
+    @staticmethod
+    def _duration(ms: int) -> str:
+        s = int(ms or 0) // 1000
+        return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+    def playlists_overview(self) -> str:
+        data = self.api.playlists_overview()
+        lines = []
+        for a in data["accounts"]:
+            lines.append(f"{a['service']}: " + (f"connected as {a['display_name'] or '?'}" if a["connected"]
+                                                 else "not connected (Playlists page → Connect)"))
+        if not data["playlists"]:
+            lines.append("No playlists fetched yet (playlists_sync).")
+        for p in data["playlists"]:
+            flags = (f", {p['pending']} pending changes" if p["pending"] else "") + ("" if p["editable"] else ", someone else's") \
+                + (", gone from the service" if p["gone"] else "")
+            lines.append(f"P{p['id']} [{p['service']}] {p['name']} — {p['count']} items{flags}")
+        return "\n".join(lines)
+
+    def playlist_show(self, playlist_id: int, offset: int = 0, limit: int = 200) -> str:
+        data = self.api.playlist_show(playlist_id, offset, max(1, min(1000, limit)))
+        p, pend = data["playlist"], data["pending"]
+        head = (f"P{p['id']} {p['name']} [{p['service']}] {data['total']} items"
+                + (f", pending: +{pend['added']} −{pend['removed']} ~{pend['moved']} moved" if any(pend.values()) else "")
+                + (f"\n{p['description']}" if p["description"] else ""))
+        lines = []
+        for x in data["items"]:
+            mark = {"added": " [added]", "removed": " [removed]"}.get(x["state"], " [moved]" if x["moved"] else "")
+            lines.append(f"#{x['id']} {x['position'] + 1}. {x['title']} — {x['artist']} ({self._duration(x['duration_ms'])}){mark}")
+        shown = len(data["items"])
+        more = f"\n… {data['total'] - offset - shown} more (offset {offset + shown})" if offset + shown < data["total"] else ""
+        return f"{head}\n" + "\n".join(lines) + more
+
+    def playlist_edit(self, playlist_id: int, ops: list) -> str:
+        r = self.api.playlist_edit(playlist_id, ops)
+        parts = [f"{r['added']} added", f"{r['removed']} removed", f"{r['moved']} moved"] + (["renamed"] if r["renamed"] else [])
+        unknown = f"\nNot recognised as {self._service_of(playlist_id)} items: {', '.join(r['unknown'][:10])}" if r["unknown"] else ""
+        return "Pending changes: " + ", ".join(parts) + ". Nothing on the service changes until playlist_push." + unknown
+
+    def _service_of(self, playlist_id: int) -> str:
+        return self.api.playlist_show(playlist_id, 0, 1)["playlist"]["service"]
+
+    def playlist_push(self, playlist_id: int) -> str:
+        r = self.api.playlist_push(playlist_id)
+        c = r["pushed"]
+        return (f"Pushed: {c['added']} added, {c['removed']} removed" + (f", {c['moved']} moved" if c.get("moved") else "")
+                + f" ({c['calls']} calls to the service); fetched back.")
+
+    def playlist_discard(self, playlist_id: int) -> str:
+        self.api.playlist_discard(playlist_id)
+        return "Pending changes dropped; the playlist is as on the service."
+
+    def playlists_sync(self, service: str, force: bool = False) -> str:
+        r = self.api.playlists_sync(service, force)
+        skipped = f"; left alone because of pending changes: {', '.join(r['skipped_with_local_changes'])}" \
+            if r["skipped_with_local_changes"] else ""
+        return f"Fetched {r['fetched']} playlists from {r['service']}{skipped}."
+
+    def playlist_create(self, service: str, name: str, description: str = "", public: bool = False) -> str:
+        r = self.api.playlist_create(service, name, description, public)
+        return f"Created P{r['id']} {r['name']} on {service} (empty; add items with playlist_edit and push)."
+
     # --- open browser tabs sent to Stash to be tidied ------------------------------------------
 
     def open_tabs_overview(self) -> str:

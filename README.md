@@ -25,6 +25,8 @@ without handing it to anyone.
      a bookmarklet, a browser extension, two-factor authentication and invitation-based registration.
    - **Open tabs**: a browser's open tabs sent to Stash to be sorted out later, so the browser can be emptied
      with nothing lost (see *Open tabs* below).
+   - **Playlists**: your Spotify and YouTube playlists copied into Stash, edited here (by hand or by the
+     assistant) and pushed back to the service; the copy is also a backup (see *Playlists* below).
    - **Trash.** Deleted bookmarks wait 30 days in the trash (account menu → Trash), whichever way they were
      deleted: one at a time, many at once, with a whole category or tab, or through an API key. Every deletion
      shows an Undo button, and restoring puts a bookmark back where it was, making its category again if needed.
@@ -68,6 +70,7 @@ without handing it to anyone.
 | `app/mailer.py` | E-mail from the server: password reset links, signed with DKIM |
 | `app/handover.py` | Project handovers saved by assistants through MCP: versions, the web view |
 | `app/tabs.py` | Open browser tabs sent to Stash: lists, states, saving as bookmarks |
+| `app/playlists.py` | Spotify and YouTube playlists: OAuth, fetching, pending edits, pushing back |
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
 | `app/mcpserver/` | The MCP endpoint `/mcp`: its tools, named result sets, previews and page reading |
 | `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
@@ -245,6 +248,35 @@ save, drop or finish tabs by hand, one at a time or many at once.
 The lists are kept apart from bookmarks: a list can be deleted without touching the bookmarks made from it, and
 only the bookmarks made from it take part in previews, undo and the trash.
 
+### Playlists
+
+**Playlists** in the top bar holds your Spotify and YouTube playlists as a copy in Stash's database. You edit
+the copy (add by link, remove, drag to reorder, rename; or ask the assistant: "move every live recording from
+Favourites to a new playlist Live") and the changes wait as *pending* until you press **Push**; only then does
+the service change. **Fetch playlists** brings the service's state in; a playlist with pending changes is left
+alone until they are pushed or discarded. A playlist deleted on the service stays in Stash marked *gone*, and
+**Export all** downloads everything as JSON, so the copy doubles as a backup.
+
+Each account connects its own developer app for each service (Stash never ships one): Playlists → **Connect…**
+shows the steps for Spotify (developer.spotify.com/dashboard → Create app → Web API → redirect URI → Client ID
+and secret) and for YouTube (a Google Cloud project with the YouTube Data API v3 enabled, an OAuth consent
+screen with yourself as a test user, and a Web application OAuth client with the redirect URI), and the exact
+redirect URI to paste: `https://<your stash>/api/playlists/accounts/<service>/callback`. The app's client id
+and secret and the tokens are stored in the database as they are. While a Google app is in *Testing*, its
+connection ends after seven days (connect again, or set the app to *In production*). YouTube's default quota is
+10 000 units a day and every added, removed or moved item costs about 50; fetching is cheap. Spotify playlists
+are pushed as a whole in one or two calls.
+
+| Tool | What it does |
+| --- | --- |
+| `playlists_overview` | the connected services and every playlist (P1, P2, …) with its size and pending changes |
+| `playlist_show` | the items of a playlist in order, with what is added, removed or moved |
+| `playlist_edit` | pending changes: `add` (addresses or ids, at a position), `remove`, `move`, `order`, `rename` |
+| `playlist_push` | writes the pending changes to the service; the assistant is told to ask first |
+| `playlist_discard` | drops the pending changes and fetches the playlist again |
+| `playlists_sync` | fetches every playlist of a service |
+| `playlist_create` | a new empty playlist on the service |
+
 ### Project handovers
 
 Besides bookmarks, the MCP server keeps written handovers of your projects: a record of what was done, where
@@ -394,7 +426,7 @@ can check and list but not remove). The verdicts are saved in `~/.cache/stash/li
 .venv/bin/python tests/trash.py    # the trash: every way of deleting, restoring, the 30-day limit
 .venv/bin/python tests/account.py  # e-mail addresses, password reset links (once, one hour), two-factor after a reset
 .venv/bin/python tests/maintenance.py  # the background upkeep of titles and icons
-.venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end, open tabs, project handovers (pip install pytest)
+.venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end, open tabs, playlists (fake services), handovers (pip install pytest)
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
 node tools/check-i18n.mjs          # missing or broken Finnish and Swedish translations
 node tools/screenshots.mjs         # the README screenshots, from a demo instance on port 8014
@@ -415,4 +447,6 @@ repository, the API, the MCP tools and the scripts are in English only.
 - Requests made by the server resolve the target first and refuse internal network and localhost addresses.
 - The bookmarklet and the extension pass page details in the URL's `#` part, which never reaches server logs;
   configure the reverse proxy to log without query strings and cookies.
-- API keys and the browsing history belong to one account and are deleted with it.
+- API keys, the browsing history, open tabs, handovers and playlists belong to one account and are deleted
+  with it. The Spotify and Google tokens and app secrets are stored in the database as they are, so protect
+  `data/` and its backups like the database itself.
