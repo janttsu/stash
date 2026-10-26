@@ -79,6 +79,7 @@ without handing it to anyone.
 | `extension/` | Browser extension (downloadable from the app at `/extension.zip`) |
 | `data/` | Database, favicon cache and `backups/`: not in version control |
 | `scripts/backup.sh` | Hourly compressed copy of the database, 30 days kept (see *Backups*) |
+| `handover.md` | The state of the work for whoever continues it: how it runs, conventions, what is done and what is next |
 
 ## Running it
 
