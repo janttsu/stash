@@ -296,8 +296,6 @@ export const FI = {
   'Import bookmarks': 'Tuo kirjanmerkkejä',
   'Or paste web addresses, one per line': 'Tai liitä verkko-osoitteet, yksi per rivi',
   'Pasted addresses go straight to the Catalog. Lines without an address are ignored.': 'Liitetyt osoitteet menevät suoraan Katalogiin. Rivit ilman osoitetta ohitetaan.',
-  'Fade bookmarks I have not used in a while': 'Haalista kirjanmerkit, joita en ole käyttänyt vähään aikaan',
-  'On the Dashboard a bookmark pales slowly when you have not opened it for a month, and is at its palest after two years. Opening it brings the colour back. Visits in the synced browsing history count as use too.': 'Työpöydällä kirjanmerkki haalistuu hiljalleen, kun sitä ei ole avattu kuukauteen, ja on haaleimmillaan kahden vuoden jälkeen. Avaaminen palauttaa värin. Myös synkronoidun selaushistorian käynnit lasketaan käytöksi.',
   'Look and behaviour': 'Ulkoasu ja toiminta',
   'Assistants and API': 'Avustajat ja rajapinta',
   'History': 'Historia',

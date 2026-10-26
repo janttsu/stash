@@ -329,8 +329,6 @@ img.fav { background: var(--fav-plate, transparent); }
   display: flex; align-items: center; gap: 8px; padding: 1px 2px 1px 8px; border-radius: 6px;
   background: color-mix(in srgb, var(--c, transparent) var(--tint), transparent);
 }
-.bm { opacity: var(--fade, 1); transition: opacity .25s; }
-.bm:hover, .bm:focus-within { opacity: 1; }
 .bm.c-none { background: transparent; }
 .bm:hover { background: color-mix(in srgb, var(--c, var(--muted)) 24%, transparent); }
 .bm__link { flex: 1; min-width: 0; padding: 4px 0; color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

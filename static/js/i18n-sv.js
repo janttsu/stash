@@ -277,8 +277,6 @@ export const SV = {
   "Import bookmarks": "Importera bokmärken",
   "Or paste web addresses, one per line": "Eller klistra in webbadresser, en per rad",
   "Pasted addresses go straight to the Catalog. Lines without an address are ignored.": "Inklistrade adresser läggs direkt i katalogen. Rader utan adress ignoreras.",
-  "Fade bookmarks I have not used in a while": "Tona ner bokmärken jag inte använt på ett tag",
-  "On the Dashboard a bookmark pales slowly when you have not opened it for a month, and is at its palest after two years. Opening it brings the colour back. Visits in the synced browsing history count as use too.": "På skrivbordet bleknar ett bokmärke långsamt när du inte öppnat det på en månad och är som blekast efter två år. Att öppna det ger färgen tillbaka. Besök i den synkade webbhistoriken räknas också som användning.",
   "Look and behaviour": "Utseende och beteende",
   "Assistants and API": "Assistenter och API",
   "History": "Historik",

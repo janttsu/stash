@@ -50,7 +50,6 @@ SCHEMES = {"http", "https", "ftp", "mailto", "tel"}
 DEFAULT_SETTINGS = {
     "theme": "auto", "lang": "", "tab_size": "m", "new_tab": True, "tooltips": True,
     "favicons": True, "auto_tag_catalog": False, "tag_order": "count", "auto_maintain": True, "assistant_rules": "",
-    "fade": True,
 }
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; "
        "base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
@@ -608,7 +607,6 @@ class SettingsPatch(BaseModel):
     tag_order: Optional[Literal["count", "alpha"]] = None
     auto_maintain: Optional[bool] = None
     assistant_rules: Optional[str] = Field(None, max_length=6000)
-    fade: Optional[bool] = None
 
 
 @app.patch("/api/settings")
@@ -833,26 +831,7 @@ def dashboard(c: Ctx = Depends(ctx)):
     for r in con.execute("SELECT bt.bookmark_id, bt.tag FROM bookmark_tags bt JOIN bookmarks b ON b.id=bt.bookmark_id"
                          " WHERE b.user_id=? AND b.category_id IS NOT NULL ORDER BY bt.tag", (c.uid,)):
         tags.setdefault(r["bookmark_id"], []).append(r["tag"])
-    # when each bookmark was last used: a click on it in Stash, a visit in the synced browsing history, or at
-    # least the day it was added (the Dashboard fades the ones unused for long)
-    from .history import url_key
-    visited = {r["url_key"]: r["last_visit"] for r in con.execute(
-        "SELECT url_key, MAX(last_visit) AS last_visit FROM history WHERE user_id=? GROUP BY url_key", (c.uid,))}
-    bookmarks = []
-    for r in rows:
-        b = bookmark_json(r, tags.get(r["id"], []))
-        b["last_use"] = max(r["used_at"] or 0, visited.get(url_key(r["url"])) or 0, r["created_at"])
-        bookmarks.append(b)
-    return {"tabs": tabs, "categories": cats, "bookmarks": bookmarks}
-
-
-@app.post("/api/bookmarks/{bookmark_id}/used")
-def bookmark_used(bookmark_id: int, c: Ctx = Depends(ctx)):
-    """The bookmark was just opened from Stash. Bookkeeping for the fading: no changeset, no redraw."""
-    if not c.con.execute("UPDATE bookmarks SET used_at=? WHERE id=? AND user_id=?",
-                         (db.now(), bookmark_id, c.uid)).rowcount:
-        raise err(404, "not_found")
-    return {"ok": True}
+    return {"tabs": tabs, "categories": cats, "bookmarks": [bookmark_json(r, tags.get(r["id"], [])) for r in rows]}
 
 
 class TabCreate(BaseModel):
