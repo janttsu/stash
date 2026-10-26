@@ -10,9 +10,10 @@ const params = new URLSearchParams(location.hash.length > 1 ? location.hash.slic
 // the popup window is reused: a new fragment means a new page to bookmark
 window.addEventListener('hashchange', () => location.reload());
 
-/** The extension passes all open tabs as #batch=<base64url JSON [{url, title}]>. */
-function readBatch() {
-  const raw = params.get('batch');
+/** The extension passes all open tabs as #batch=<base64url JSON [{url, title}]> (to bookmark now) or
+ * #tabs=<the same> (to send to Open tabs and sort out later). */
+function readBatch(key = 'batch') {
+  const raw = params.get(key);
   if (!raw) return null;
   try {
     const bytes = Uint8Array.from(atob(raw.replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0));
@@ -46,8 +47,45 @@ async function boot() {
   document.title = t('Add to Stash');
   applyTheme(state.user.settings.theme);
   await loadDash();
+  const sent = readBatch('tabs');
+  if (sent) return sendTabsPage(sent);
   const batch = readBatch();
   return batch ? batchPage(batch) : singlePage();
+}
+
+function sendTabsPage(list) {
+  const name = h('input', { type: 'text', maxlength: 100, value: navigator.userAgentData?.platform || '', placeholder: t('e.g. laptop, Firefox') });
+  const error = h('p', { class: 'form-error', hidden: true });
+  const submit = h('button', { type: 'submit', class: 'btn primary' }, t('Send to Stash'));
+  fill(app, h('form', {
+    class: 'addpage',
+    onsubmit: async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      submit.disabled = true;
+      try {
+        const res = await api('POST', '/api/open-tabs/import', { name: name.value, items: list.map((x) => ({ url: x.url, title: x.title || '' })) });
+        fill(app, h('div', { class: 'addpage done' },
+          h('p', { class: 'done__mark' }, '✓'),
+          h('p', null, t('{n} tabs sent to Stash. You can close them in the browser now.', { n: res.tabs })),
+          res.already_bookmarked ? h('p', { class: 'muted' }, t('{n} of them were already bookmarked.', { n: res.already_bookmarked })) : null,
+          h('p', null, h('a', { class: 'btn', href: '/#/tabs' }, t('Open tabs')))));
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+        submit.disabled = false;
+      }
+    },
+  },
+    h('h1', null, t('Send open tabs to Stash')),
+    h('p', { class: 'muted' }, t('The tabs are kept in Open tabs until you, or your assistant, have sorted them out: saved the useful ones as bookmarks and dropped the rest. Then you can close them here.')),
+    h('ul', { class: 'plain batch' }, list.map((r) => h('li', null, h('span', null, r.title || r.url, h('small', { class: 'muted block' }, r.url))))),
+    h('div', { class: 'form' },
+      h('label', { class: 'field' }, h('span', null, t('Name of this list')), name)),
+    error,
+    h('div', { class: 'row end' },
+      h('button', { type: 'button', class: 'btn', onclick: () => finish(t('Nothing was saved')) }, t('Cancel')),
+      submit)));
 }
 
 async function singlePage(existing) {

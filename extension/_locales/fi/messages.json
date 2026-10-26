@@ -13,5 +13,8 @@
   },
   "menuAll": {
     "message": "Tallenna kaikki avoimet välilehdet"
+  },
+  "menuSend": {
+    "message": "Lähetä kaikki avoimet välilehdet Stashiin (siivottavaksi myöhemmin)"
   }
 }

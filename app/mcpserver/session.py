@@ -438,3 +438,56 @@ class Session:
         r = self.api.handover_save(project, body, ai=ai, machine=machine, session=session, title=title,
                                    expected_version=expected_version, git_commit=git_commit)
         return f"Saved {r['project']} as version {r['version']}."
+
+    # --- open browser tabs sent to Stash to be tidied ------------------------------------------
+
+    def open_tabs_overview(self) -> str:
+        rows = self.api.open_tab_lists()
+        if not rows:
+            return "No open tabs have been sent to Stash yet."
+        out = ["Lists of open tabs (id  sent  name: open / saved / done / dropped):"]
+        for r in rows:
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(r["created_at"]))
+            out.append(f"L{r['id']}  {when}  {r['name'] or '(no name)'}: {r['open']} open / {r['saved']} saved"
+                       f" / {r['done']} done / {r['dropped']} dropped")
+        return "\n".join(out)
+
+    @staticmethod
+    def _tab_line(x: dict) -> str:
+        path = x["url"].split("://", 1)[-1][:90]
+        extra = (f" | {x['state']}" if x["state"] != "open" else "") + (f" | note: {x['note']}" if x["note"] else "")
+        return f"T{x['id']} {x['title'][:80]} | {path}{extra}"
+
+    def open_tabs_list(self, list_id: int | None = None, state: str = "open", text: str = "", host: str = "",
+                       offset: int = 0, limit: int = 100) -> str:
+        data = self.api.open_tabs(list_id=list_id, state=state, text=text, host=host, offset=offset, limit=limit)
+        if not data["total"]:
+            return "No tabs match."
+        shown = data["items"]
+        more = (f"\n… {data['total'] - offset - len(shown)} more (offset {offset + len(shown)})"
+                if offset + len(shown) < data["total"] else "")
+        return (f"{data['total']} tabs, showing {offset + 1}–{offset + len(shown)} (T<id> title | address | state | note):\n"
+                + "\n".join(self._tab_line(x) for x in shown) + more)
+
+    def open_tabs_resolve(self, ids: list, state: str, note: str = "") -> str:
+        r = self.api.open_tabs_resolve(ints(ids), state, note or None)
+        return f"{r['updated']} tabs marked {r['state']}."
+
+    def open_tabs_save(self, ids: list, tags: list[str] | None = None, tab: str = "", category: str = "",
+                       summary: str = "", note: str = "") -> str:
+        """Bookmarks for these tabs as one undoable change, then the tabs are marked saved."""
+        wanted = ints(ids)
+        if not wanted:
+            raise ValueError("give the ids of the tabs to save")
+        chosen = self.api.open_tabs(ids=wanted, limit=1000)["items"]
+        if not chosen:
+            raise KeyError("none of these tab ids exist")
+        place = {"tab": tab, "category": category} if tab and category else {"catalog": True}
+        ops = [{"op": "create", "url": x["url"], "title": x["title"], "tags": tags or [], **place} for x in chosen]
+        result = self.api.changes(ops, summary or f"Bookmarks from {len(chosen)} open tabs", dry_run=False)
+        marked = self.api.open_tabs_mark_saved([x["id"] for x in chosen], note or None)
+        self.ensure(force=True)
+        made = result.get("counts", {}).get("created", 0)
+        head = f"Change #{result['changeset']}: " if result.get("changeset") else ""
+        return (f"{head}{made} bookmarks made, {len(result.get('skipped', []))} were already bookmarked;"
+                f" {marked['saved']} tabs marked saved." + (" Undoable with undo." if head else ""))

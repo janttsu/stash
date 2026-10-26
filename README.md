@@ -23,6 +23,8 @@ without handing it to anyone.
    - **Catalog**: a tagged store with fast search.
    - Import and export as a browser bookmarks file, sharing a tab by link, finding duplicates and dead links,
      a bookmarklet, a browser extension, two-factor authentication and invitation-based registration.
+   - **Open tabs**: a browser's open tabs sent to Stash to be sorted out later, so the browser can be emptied
+     with nothing lost (see *Open tabs* below).
    - **Trash.** Deleted bookmarks wait 30 days in the trash (account menu → Trash), whichever way they were
      deleted: one at a time, many at once, with a whole category or tab, or through an API key. Every deletion
      shows an Undo button, and restoring puts a bookmark back where it was, making its category again if needed.
@@ -65,6 +67,7 @@ without handing it to anyone.
 | `app/history.py` | Browsing history sent by devices: upload, visit counts for bookmarks, search |
 | `app/mailer.py` | E-mail from the server: password reset links, signed with DKIM |
 | `app/handover.py` | Project handovers saved by assistants through MCP: versions, the web view |
+| `app/tabs.py` | Open browser tabs sent to Stash: lists, states, saving as bookmarks |
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
 | `app/mcpserver/` | The MCP endpoint `/mcp`: its tools, named result sets, previews and page reading |
 | `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
@@ -217,6 +220,31 @@ How it stays safe:
 
 A key's sets and previews are kept in memory for an hour after its last use, so a conversation can build on them.
 
+### Open tabs
+
+A browser with two hundred open tabs is hard to close: some of them are things left unfinished. **Open tabs**
+in the top bar keeps them. Send them with the extension (its toolbar button's menu → *Send all open tabs to
+Stash*, every window at once) or paste their addresses (Open tabs → *Paste a list…*; in Firefox, select all
+tabs with Ctrl+Shift+A, Ctrl+A and copy their links), then close them in the browser. Every sending is a list,
+and each tab in it is *open* (still to look at), *saved* (now a bookmark), *done* or *dropped*. A tab whose
+address is already bookmarked is marked saved at once.
+
+The sorting is meant for the assistant: "sort out the tabs I sent yesterday". With these tools it saves the
+ones worth keeping as bookmarks (in a Dashboard category or the Catalog, as one undoable change), drops search
+result pages, duplicates and the like, marks finished things done, and leaves the real work in progress open
+with a note on what was unfinished, so you only look through those. The page shows the same lists and lets you
+save, drop or finish tabs by hand, one at a time or many at once.
+
+| Tool | What it does |
+| --- | --- |
+| `open_tabs_overview` | the sent lists with how many tabs in each are open, saved, done and dropped |
+| `open_tabs_list` | the tabs of a list or all of them (T1, T2, …), by state, words or site |
+| `open_tabs_save` | makes bookmarks of the given tabs (`tags`, `tab` and `category`, or the Catalog) as one undoable change, and marks them saved |
+| `open_tabs_resolve` | marks tabs done or dropped, or leaves them open with a note for you |
+
+The lists are kept apart from bookmarks: a list can be deleted without touching the bookmarks made from it, and
+only the bookmarks made from it take part in previews, undo and the trash.
+
 ### Project handovers
 
 Besides bookmarks, the MCP server keeps written handovers of your projects: a record of what was done, where
@@ -366,7 +394,7 @@ can check and list but not remove). The verdicts are saved in `~/.cache/stash/li
 .venv/bin/python tests/trash.py    # the trash: every way of deleting, restoring, the 30-day limit
 .venv/bin/python tests/account.py  # e-mail addresses, password reset links (once, one hour), two-factor after a reset
 .venv/bin/python tests/maintenance.py  # the background upkeep of titles and icons
-.venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end, project handovers (pip install pytest)
+.venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end, open tabs, project handovers (pip install pytest)
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
 node tools/check-i18n.mjs          # missing or broken Finnish and Swedish translations
 node tools/screenshots.mjs         # the README screenshots, from a demo instance on port 8014

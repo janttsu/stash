@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from .. import main  # noqa: F401  (first: main, api_v1 and history import each other)
-from .. import api_v1, db, handover, history  # noqa: E402,I001
+from .. import api_v1, db, handover, history, tabs  # noqa: E402,I001
 from ..api_v1 import KeyCtx
 
 MAX_OPS = 20_000   # one preview may touch many bookmarks (e.g. new titles for a whole set)
@@ -83,6 +83,26 @@ class LocalAPI:
         def run(c: KeyCtx):
             self._writer(c)
             return handover.save(c, project, body, **fields)
+        return self._call(run)
+
+    # --- open browser tabs sent to Stash (app/tabs.py) ---------------------------------------------------
+
+    def open_tab_lists(self) -> list[dict]:
+        return self._call(tabs.lists)
+
+    def open_tabs(self, **spec) -> dict:
+        return self._call(lambda c: tabs.tabs_of(c, **spec))
+
+    def open_tabs_resolve(self, ids: list[int], state: str, note=None) -> dict:
+        def run(c: KeyCtx):
+            self._writer(c)
+            return tabs.resolve(c, ids, state, note)
+        return self._call(run)
+
+    def open_tabs_mark_saved(self, ids: list[int], note=None) -> dict:
+        def run(c: KeyCtx):
+            self._writer(c)
+            return tabs.mark_saved(c, ids, note)
         return self._call(run)
 
     # --- changing -------------------------------------------------------------------------------------

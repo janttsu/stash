@@ -190,6 +190,29 @@ CREATE TABLE IF NOT EXISTS handovers (
     latest_version INTEGER NOT NULL DEFAULT 0,
     UNIQUE (user_id, name)
 );
+-- open browser tabs sent to Stash to be tidied later (app/tabs.py): a list per sending, and its tabs with a
+-- state: open (still to look at), done (finished), saved (made a bookmark) or dropped (not worth keeping)
+CREATE TABLE IF NOT EXISTS open_tab_lists (
+    id         INTEGER PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS open_tabs (
+    id          INTEGER PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    list_id     INTEGER NOT NULL REFERENCES open_tab_lists(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL DEFAULT 0,
+    url         TEXT NOT NULL,
+    host        TEXT NOT NULL DEFAULT '',
+    title       TEXT NOT NULL DEFAULT '',
+    state       TEXT NOT NULL DEFAULT 'open',
+    note        TEXT NOT NULL DEFAULT '',
+    bookmark_id INTEGER,
+    updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS open_tabs_list ON open_tabs(list_id, position);
+CREATE INDEX IF NOT EXISTS open_tabs_user ON open_tabs(user_id, state);
 CREATE TABLE IF NOT EXISTS handover_versions (
     id          INTEGER PRIMARY KEY,
     handover_id INTEGER NOT NULL REFERENCES handovers(id) ON DELETE CASCADE,

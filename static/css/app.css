@@ -261,6 +261,21 @@ img.fav { background: var(--fav-plate, transparent); }
 .trash__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .trash__buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .trash__buttons .btn.danger-quiet { margin-right: 0; }
+.tabs__card { max-width: 1000px; margin: 0 auto; }
+.tabs__lists { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+.tabs__list { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; cursor: pointer; }
+.tabs__list.active { border-color: var(--accent); background: var(--surface-2); }
+.tabs__filters { margin-top: 14px; gap: 10px; flex-wrap: wrap; }
+.tabs__filters input[type=search] { flex: 1; min-width: 160px; }
+.tabs__states { display: flex; gap: 4px; flex-wrap: wrap; }
+.tabs__states .btn.active { color: var(--text); background: var(--surface-2); font-weight: 600; }
+.tabs__bulk { margin-top: 10px; gap: 8px; flex-wrap: wrap; }
+.tabs__items { margin-top: 8px; }
+.tabs__item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
+.tabs__item--dropped .tabs__title, .tabs__item--done .tabs__title { color: var(--muted); text-decoration: line-through; }
+.tabs__text { flex: 1; min-width: 0; }
+.tabs__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.tabs__buttons { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .handover__card { max-width: 900px; margin: 0 auto; }
 .handover__list { margin-top: 14px; }
 .handover__item { padding: 10px 0; border-top: 1px solid var(--border); }

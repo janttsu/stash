@@ -13,5 +13,8 @@
   },
   "menuAll": {
     "message": "Bookmark all open tabs"
+  },
+  "menuSend": {
+    "message": "Send all open tabs to Stash (to sort out later)"
   }
 }

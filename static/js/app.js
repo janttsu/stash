@@ -6,6 +6,7 @@ import { refresh as refreshDashboard, renderDashboard } from './dashboard.js';
 import { setLang, t } from './i18n.js';
 import { renderSettings } from './settings.js';
 import { renderHandovers } from './handover.js';
+import { renderTabs } from './tabs.js';
 import { renderTrash } from './trash.js';
 import { bookmarkDialog } from './widgets.js';
 
@@ -71,7 +72,7 @@ function shell() {
   fill(app,
     h('header', { class: 'top' },
       h('a', { class: 'brand', href: '#/' }, h('img', { src: '/static/icon.svg', alt: '', width: 24, height: 24 }), 'Stash'),
-      h('nav', { class: 'top__nav' }, nav('#/', t('Dashboard')), nav('#/bookmarks', t('My Bookmarks'))),
+      h('nav', { class: 'top__nav' }, nav('#/', t('Dashboard')), nav('#/bookmarks', t('My Bookmarks')), nav('#/tabs', t('Open tabs'))),
       h('span', { class: 'grow' }),
       h('button', {
         type: 'button', class: 'btn primary',
@@ -97,17 +98,19 @@ async function route() {
   const params = Object.fromEntries(new URLSearchParams(query || ''));
   const view = document.getElementById('view');
   const name = path === '/bookmarks' ? 'bookmarks' : path === '/settings' ? 'settings'
-    : path === '/trash' ? 'trash' : path === '/handovers' ? 'handovers' : 'dashboard';
+    : path === '/trash' ? 'trash' : path === '/handovers' ? 'handovers' : path === '/tabs' ? 'tabs' : 'dashboard';
   if (current === 'bookmarks' && name !== 'bookmarks') leaveBookmarks();
   current = name;
+  const active = { bookmarks: '#/bookmarks', dashboard: '#/', tabs: '#/tabs' }[name] || '';
   for (const link of document.querySelectorAll('.top__link')) {
-    link.classList.toggle('active', link.dataset.route === (name === 'bookmarks' ? '#/bookmarks' : name === 'dashboard' ? '#/' : ''));
+    link.classList.toggle('active', link.dataset.route === active);
   }
   await attempt(async () => {
     if (name === 'bookmarks') await renderBookmarks(view, params);
     else if (name === 'settings') await renderSettings(view);
     else if (name === 'trash') await renderTrash(view);
     else if (name === 'handovers') await renderHandovers(view, params);
+    else if (name === 'tabs') await renderTabs(view, params);
     else await renderDashboard(view, params.tab ? { tab: Number(params.tab) } : null);
   });
 }

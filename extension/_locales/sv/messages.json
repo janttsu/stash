@@ -13,5 +13,8 @@
   },
   "menuAll": {
     "message": "Bokmärk alla öppna flikar"
+  },
+  "menuSend": {
+    "message": "Skicka alla öppna flikar till Stash (att reda ut senare)"
   }
 }
