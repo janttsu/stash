@@ -63,7 +63,7 @@ class LocalAPI:
                                                    bookmarked=bookmarked, sort="visits_90d", offset=0, limit=limit, c=c))
 
     def rules(self) -> str:
-        """The user's standing rules for the assistant (Settings → Assistant (MCP))."""
+        """The user's standing rules for the assistant (AI → Assistant (MCP))."""
         def read(c: KeyCtx) -> str:
             return str(json.loads(c.user["settings"] or "{}").get("assistant_rules", "")).strip()
         return self._call(read)

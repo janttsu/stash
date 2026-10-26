@@ -1,6 +1,6 @@
 """Stash as a remote MCP server: https://<your stash>/mcp, for Claude Code, Qwen Code, Gemini CLI and other MCP clients.
 
-Streamable HTTP, stateless, JSON answers. Every request carries an API key from Settings → Assistant (MCP)
+Streamable HTTP, stateless, JSON answers. Every request carries an API key from AI → Assistant (MCP)
 (`Authorization: Bearer stash_…`); the key decides whose bookmarks the tools see and whether they may change
 anything. The client's model studies the bookmarks with read-only tools, previews every change as an exact dry
 run, and nothing changes until `apply_changes` is called with a preview id. What a key has found (sets S1, S2, …)

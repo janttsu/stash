@@ -11,8 +11,10 @@ export async function renderSettings(container) {
   const groups = [
     group(t('Look and behaviour'), appearance(), behaviour(), addButtons()),
     group(t('Bookmarks'), importExport(), linkCheck()),
-    group(t('Assistants and API'), apiKeys()),
-    group(t('History'), changeHistory(), browsingHistory()),
+    group(t('Assistants and API'), h('section', { class: 'card' },
+      h('p', null, t('Connecting an assistant, its keys and rules, the handovers it saves and the changes it made are in the AI section.')),
+      h('div', { class: 'row' }, h('a', { class: 'btn', href: '#/ai' }, t('Open the AI section'))))),
+    group(t('History'), browsingHistory()),
     group(t('Account'), account()),
   ];
   let adminCard = null;
@@ -129,13 +131,14 @@ async function createKey({ title, name: defaultName, askWrite = true, hint }) {
   await openModal(t('Your new key'), h('div', { class: 'form' },
     h('p', null, hint),
     h('input', { type: 'text', class: 'input mono', readOnly: true, value: created.key, onfocus: (e) => e.target.select() }),
-    h('p', { class: 'muted small' }, t('The key is shown only once. Keep it like a password; you can revoke it in Settings → Assistant (MCP).'))), [
+    h('p', { class: 'muted small' }, t('The key is shown only once. Keep it like a password; you can revoke it in AI → Assistant (MCP).'))), [
     { label: t('Copy'), action: async () => { await copyText(created.key); return false; } },
     { label: t('Done'), kind: 'primary', action: () => true },
   ]);
 }
 
-function apiKeys() {
+/** The assistant card: the MCP address, connecting an assistant, the keys and the standing rules. On the AI page. */
+export function assistantCard() {
   const card = h('section', { class: 'card' });
   const url = `${location.origin}/mcp`;
   const draw = async () => {
@@ -254,7 +257,8 @@ async function connectAssistant(redraw) {
 const fmtWhen = (seconds) => new Date(seconds * 1000).toLocaleString(document.documentElement.lang || undefined,
   { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-function changeHistory() {
+/** Changes made with API keys and MCP, each undoable. On the AI page. */
+export function changeHistoryCard() {
   const card = h('section', { class: 'card' });
   const counts = (c) => [
     c.created && t('{n} added', { n: c.created }),

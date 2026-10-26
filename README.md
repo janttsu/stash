@@ -27,6 +27,8 @@ without handing it to anyone.
      with nothing lost (see *Open tabs* below).
    - **Playlists**: your Spotify and YouTube playlists copied into Stash, edited here (by hand or by the
      assistant) and pushed back to the service; the copy is also a backup (see *Playlists* below).
+   - **AI**: one section for everything about assistants: connecting one (the MCP address, keys and your
+     standing rules), the handovers it saves, and the changes it made, each undoable.
    - **Trash.** Deleted bookmarks wait 30 days in the trash (account menu → Trash), whichever way they were
      deleted: one at a time, many at once, with a whole category or tab, or through an API key. Every deletion
      shows an Undo button, and restoring puts a bookmark back where it was, making its category again if needed.
@@ -173,7 +175,7 @@ Stash is an MCP server at `https://<your stash>/mcp` (streamable HTTP). An assis
 Code or Gemini CLI connects to it with an API key and can then search, tidy and fix your bookmarks in plain
 language. Nothing is installed on your computer.
 
-The easy way is Settings → Assistant (MCP) → **Connect an assistant**: choose your assistant, and Stash creates a
+The easy way is AI → Assistant (MCP) → **Connect an assistant**: choose your assistant, and Stash creates a
 key and shows the finished setup with the key in it. The same card explains how to use it, lists your keys with
 their last use, lets you switch a key between read-only and read-and-change, revoke it, and write standing rules
 for the assistant ("recipes always have the tag food").
@@ -215,7 +217,7 @@ How it stays safe:
 - **Preview, then apply.** `preview_changes` is an exact dry run. `apply_changes` only takes a preview id and
   runs the dry run once more first: if the bookmarks changed after the preview, nothing is applied. Keep
   `apply_changes` behind your assistant's confirmation prompt.
-- **Undoable.** Every applied preview is one changeset (Settings → Changes made with API keys), and deleted
+- **Undoable.** Every applied preview is one changeset (AI → Changes made with API keys), and deleted
   bookmarks also wait 30 days in the trash.
 - **Keys.** Each request needs an API key; a read-only key can look and preview but not apply. A key revoked in
   Settings stops working at once. The endpoint answers only for this server's own address.
@@ -294,13 +296,13 @@ assistant to "save the handover for this project to Stash".
 A project name is 1–64 lowercase letters, digits and dashes; a handover is at most 200 000 characters. Every
 save is a new version and earlier ones are kept; nothing is deleted. The tools need an API key like every other
 MCP call, and saving needs a key that is allowed to make changes. Handovers are separate from bookmarks: they
-have no sets, previews, changesets, trash or undo. The account menu → **Handovers** shows the projects and lets
+have no sets, previews, changesets, trash or undo. The **AI** section in the top bar shows the projects and lets
 you read any version in the browser.
 
 ## The API
 
 Other computers and programs use Stash at `/api/v1` with an API key (`Authorization: Bearer stash_…`).
-Keys are created in Settings → Assistant (MCP); only a hash of the key is stored. A key can only read unless it is
+Keys are created in AI → Assistant (MCP); only a hash of the key is stored. A key can only read unless it is
 allowed to make changes. `/api/v1` never accepts the session cookie, so it needs no CSRF header.
 
 | Call | What it does |
@@ -325,7 +327,7 @@ rolls them back, so the preview (`diff`: each bookmark's tags, place, position a
 exactly what would happen. A real run stores a changeset (the latest 200) with the earlier state of every
 touched bookmark and category; undoing it restores them, brings deleted bookmarks back and removes added ones.
 If a later change touched the same bookmarks, undo needs `force=true`. Changes can also be seen and undone in
-Settings → Changes made with API keys.
+AI → Changes made with API keys.
 
 Site icons are a cache shared by all accounts. A refresh fetches only sites the caller has bookmarked, never
 replaces a working icon with a failure, and changes the icon version the web UI loads icons with, so browsers
@@ -390,7 +392,7 @@ curl -o ~/stash-linkcheck.py https://stash.example.com/dl/stash-linkcheck.py
 ~/.local/share/stash-linkcheck/bin/python ~/stash-linkcheck.py            # check, list, ask, remove
 ```
 
-The key comes from Settings → Assistant (MCP) → Create a key for a program, with "Allow changes" (a read-only key
+The key comes from AI → Assistant (MCP) → Create a key for a program, with "Allow changes" (a read-only key
 can check and list but not remove). The verdicts are saved in `~/.cache/stash/linkcheck-report.json`;
 `--resume` reuses them and checks only the rest, `--no-delete` only skips the removal (tags are still put in order), `--no-tags` skips the tagging, `--show-browser` shows the window.
 

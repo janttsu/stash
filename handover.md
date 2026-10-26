@@ -7,10 +7,11 @@ Last updated 2026-10-26.
 ## What this is
 
 A self-hosted bookmark manager (FastAPI + SQLite + plain ES modules, no build step) with an MCP server for AI
-assistants. Beside bookmarks it now holds three more things, each its own section in the top bar or account
-menu: **Open tabs** (a browser's open tabs sent here to be sorted out later), **Playlists** (Spotify and YouTube
-playlists copied in, edited as pending changes, pushed back) and **Handovers** (versioned project handover texts
-saved by assistants over MCP). README.md describes every feature for users; this file is about the work.
+assistants. The top bar has five sections: **Dashboard**, **My Bookmarks**, **Open tabs** (a browser's open
+tabs sent here to be sorted out later), **Playlists** (Spotify and YouTube playlists copied in, edited as pending
+changes, pushed back) and **AI** (`static/js/ai.js`: connecting an assistant with keys and rules, the versioned
+**Handovers** assistants save over MCP, and the undoable changes made with API keys). Settings keeps the rest.
+README.md describes every feature for users; this file is about the work.
 
 ## Where it runs
 
@@ -71,7 +72,11 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   more than 100 items, YouTube quota use on a push, and that a Google app in *Testing* really needs a new
   connection after seven days. Tokens are refreshed when expired; a failed refresh asks the user to connect
   again. Items with no id (Spotify local files) are skipped.
-- **Handovers** (`app/handover.py`, `static/js/handover.js`): done, tests in `tests/mcp/test_handover.py`.
+- **Handovers** (`app/handover.py`, `static/js/handover.js` as a card on the AI page): done, tests in
+  `tests/mcp/test_handover.py`; checked live on production with a throwaway account on 2026-10-26.
+- **AI section** (`static/js/ai.js`): the assistant card and change history moved here from Settings
+  (`settings.js` exports them as `assistantCard()` and `changeHistoryCard()`); Settings → Assistants and API
+  only points here. `#/handovers` still routes to the AI page.
 - **Dashboard "bookmarks fade with disuse"** was added and then reverted on request; the `used_at` column it
   added may still exist in older databases and is unused.
 - The browser extension zip is built by the server from `extension/` on each download; after changing the

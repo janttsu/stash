@@ -18,7 +18,7 @@ When a page has been checked, Stash stores the time with the bookmark (checked_a
 checked longest ago first, so --limit goes on through the whole collection instead of checking the same pages
 again. This needs a key that can write; a read-only key still checks, but the times are not stored.
 
-Stash is used through its MCP endpoint (/mcp) with an API key: Settings → Assistant (MCP) → Create a key for a
+Stash is used through its MCP endpoint (/mcp) with an API key: AI → Assistant (MCP) → Create a key for a
 program, with "Allow changes" (a read-only key can check but not remove).
 
 Setup on Arch Linux (other distributions alike):
@@ -103,7 +103,7 @@ class Stash:
                 answer = json.loads(r.read())
         except urllib.error.HTTPError as e:
             if e.code == 401:
-                sys.exit("Stash did not accept the API key. Run --setup with a key from Settings → Assistant (MCP).")
+                sys.exit("Stash did not accept the API key. Run --setup with a key from AI → Assistant (MCP).")
             sys.exit(f"Stash answered {e.code}: {e.read()[:300].decode(errors='replace')}")
         except urllib.error.URLError as e:
             sys.exit(f"Cannot reach Stash at {self.endpoint}: {e.reason}")
@@ -154,7 +154,7 @@ def setup() -> dict:
     url = input(f"Stash address [{cfg.get('url', 'https://')}]: ").strip() or cfg.get("url", "")
     if not url.startswith("https://") and not re.match(r"http://(localhost|127\.|192\.168\.|10\.)", url):
         sys.exit("The address must start with https://")
-    key = getpass.getpass("API key (Stash → Settings → Assistant (MCP) → Create a key for a program; hidden): ") \
+    key = getpass.getpass("API key (Stash → AI → Assistant (MCP) → Create a key for a program; hidden): ") \
         .strip() or cfg.get("key", "")
     cfg.update(url=url.rstrip("/"), key=key)
     count = json.loads(Stash(cfg["url"], key).tool("list_urls", set_name="ALL", limit=1))["total"]
@@ -541,7 +541,7 @@ def apply_tags(stash: Stash, bookmarks: list[dict], checked: dict) -> None:
         except RuntimeError as e:
             if "read_only_key" in str(e):
                 print("This API key can only read, so the tags were not changed. Allow changes for it in "
-                      "Settings → Assistant (MCP), then run again with --resume.")
+                      "AI → Assistant (MCP), then run again with --resume.")
                 return
             raise
     print("Tags done. Undo: ask your assistant to undo the change, or Stash → Settings → recent changes.")
@@ -574,7 +574,7 @@ def ask_and_delete(stash: Stash, gone: list[dict]) -> None:
         print(stash.tool("apply_changes", preview_id=pid.group(1)).splitlines()[0])
     except RuntimeError as e:
         if "read_only_key" in str(e):
-            sys.exit("This API key can only read. Allow changes for it in Settings → Assistant (MCP), then run "
+            sys.exit("This API key can only read. Allow changes for it in AI → Assistant (MCP), then run "
                      "again with --resume (the pages are not checked again).")
         raise
     print("Removed. Undo: Stash → account menu → Trash, or ask your assistant to undo the change.")
