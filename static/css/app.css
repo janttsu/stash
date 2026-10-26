@@ -261,6 +261,13 @@ img.fav { background: var(--fav-plate, transparent); }
 .trash__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .trash__buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .trash__buttons .btn.danger-quiet { margin-right: 0; }
+.handover__card { max-width: 900px; margin: 0 auto; }
+.handover__list { margin-top: 14px; }
+.handover__item { padding: 10px 0; border-top: 1px solid var(--border); }
+.handover__title { font-weight: 600; }
+.handover__versions { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 12px; }
+.handover__version.active { font-weight: 600; text-decoration: underline; }
+.handover__body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
 @media (max-width: 600px) { .trash__item { flex-wrap: wrap; } .trash__buttons { width: 100%; justify-content: flex-start; } }
 
 /* --- header --- */

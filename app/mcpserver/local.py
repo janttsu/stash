@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from .. import main  # noqa: F401  (first: main, api_v1 and history import each other)
-from .. import api_v1, db, history  # noqa: E402,I001
+from .. import api_v1, db, handover, history  # noqa: E402,I001
 from ..api_v1 import KeyCtx
 
 MAX_OPS = 20_000   # one preview may touch many bookmarks (e.g. new titles for a whole set)
@@ -70,6 +70,20 @@ class LocalAPI:
 
     def history(self, limit: int = 20) -> list[dict]:
         return self._call(lambda c: api_v1.changeset_list(c, max(1, min(200, limit))))
+
+    # --- project handovers (app/handover.py): separate from bookmarks ---------------------------------
+
+    def handover_list(self) -> list[dict]:
+        return self._call(handover.list_projects)
+
+    def handover_get(self, project: str, version=None) -> dict:
+        return self._call(lambda c: handover.get(c, project, version))
+
+    def handover_save(self, project: str, body: str, **fields) -> dict:
+        def run(c: KeyCtx):
+            self._writer(c)
+            return handover.save(c, project, body, **fields)
+        return self._call(run)
 
     # --- changing -------------------------------------------------------------------------------------
 

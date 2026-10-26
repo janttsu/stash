@@ -410,3 +410,31 @@ class Session:
         self.ensure(force=True)
         return (f"Undid #{target['id']} {target.get('summary', '')}: {result['restored']} restored, "
                 f"{result['removed']} removed.")
+
+    # --- project handovers: a separate store, nothing to do with bookmarks or sets -------------
+
+    def handover_list(self) -> str:
+        rows = self.api.handover_list()
+        if not rows:
+            return "No handovers saved yet."
+        out = []
+        for r in rows:
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(r["updated_at"]))
+            who = " / ".join(x for x in (r["ai"], r["machine"]) if x)
+            out.append(f"{r['name']}  v{r['latest_version']}  {when}  {who}  {r['title'] or ''}".rstrip())
+        return "\n".join(out)
+
+    def handover_get(self, project: str, version: int | None = None) -> str:
+        r = self.api.handover_get(project, version)
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(r["created_at"]))
+        who = " / ".join(x for x in (r["ai"], r["machine"], r["session"]) if x)
+        head = (f"{r['project']} v{r['version']} of {r['latest_version']}  {when}  {who}"
+                + (f"  commit {r['git_commit']}" if r["git_commit"] else "")
+                + (f"\n{r['title']}" if r["title"] else ""))
+        return f"{head}\n\n{r['body']}"
+
+    def handover_save(self, project: str, body: str, ai: str = "", machine: str = "", session: str = "",
+                      title: str = "", expected_version: int | None = None, git_commit: str = "") -> str:
+        r = self.api.handover_save(project, body, ai=ai, machine=machine, session=session, title=title,
+                                   expected_version=expected_version, git_commit=git_commit)
+        return f"Saved {r['project']} as version {r['version']}."

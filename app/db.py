@@ -179,6 +179,30 @@ CREATE TABLE IF NOT EXISTS history_sources (
     synced_at INTEGER,
     PRIMARY KEY (user_id, source)
 );
+-- project handovers written by AI assistants through MCP (app/handover.py): one row per project, and an
+-- append-only version history. Separate from bookmarks: no changeset, no trash, no undo.
+CREATE TABLE IF NOT EXISTS handovers (
+    id             INTEGER PRIMARY KEY,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name           TEXT NOT NULL,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL,
+    latest_version INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (user_id, name)
+);
+CREATE TABLE IF NOT EXISTS handover_versions (
+    id          INTEGER PRIMARY KEY,
+    handover_id INTEGER NOT NULL REFERENCES handovers(id) ON DELETE CASCADE,
+    version     INTEGER NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    body        TEXT NOT NULL,
+    ai          TEXT NOT NULL DEFAULT '',
+    machine     TEXT NOT NULL DEFAULT '',
+    session     TEXT NOT NULL DEFAULT '',
+    git_commit  TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL,
+    UNIQUE (handover_id, version)
+);
 """
 
 

@@ -64,6 +64,7 @@ without handing it to anyone.
 | `app/api_v1.py` | `/api/v1` for API keys, plus managing keys and the change history |
 | `app/history.py` | Browsing history sent by devices: upload, visit counts for bookmarks, search |
 | `app/mailer.py` | E-mail from the server: password reset links, signed with DKIM |
+| `app/handover.py` | Project handovers saved by assistants through MCP: versions, the web view |
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
 | `app/mcpserver/` | The MCP endpoint `/mcp`: its tools, named result sets, previews and page reading |
 | `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
@@ -216,6 +217,25 @@ How it stays safe:
 
 A key's sets and previews are kept in memory for an hour after its last use, so a conversation can build on them.
 
+### Project handovers
+
+Besides bookmarks, the MCP server keeps written handovers of your projects: a record of what was done, where
+things are and what comes next, so a later session, another assistant or another computer can pick the work up.
+It is meant for projects that have no repository of their own, and it stays on your own server. Ask the
+assistant to "save the handover for this project to Stash".
+
+| Tool | What it does |
+| --- | --- |
+| `handover_save` | stores the next version of a project's handover (`project`, `body`, and who wrote it: `ai`, `machine`, `session`, `title`, `git_commit`). With `expected_version` the save is refused unless that is still the latest version, so two assistants never overwrite each other unnoticed |
+| `handover_get` | the latest version of a project, or a given one |
+| `handover_list` | every project with its latest version, when it was updated, and the assistant and machine that wrote it |
+
+A project name is 1–64 lowercase letters, digits and dashes; a handover is at most 200 000 characters. Every
+save is a new version and earlier ones are kept; nothing is deleted. The tools need an API key like every other
+MCP call, and saving needs a key that is allowed to make changes. Handovers are separate from bookmarks: they
+have no sets, previews, changesets, trash or undo. The account menu → **Handovers** shows the projects and lets
+you read any version in the browser.
+
 ## The API
 
 Other computers and programs use Stash at `/api/v1` with an API key (`Authorization: Bearer stash_…`).
@@ -346,7 +366,7 @@ can check and list but not remove). The verdicts are saved in `~/.cache/stash/li
 .venv/bin/python tests/trash.py    # the trash: every way of deleting, restoring, the 30-day limit
 .venv/bin/python tests/account.py  # e-mail addresses, password reset links (once, one hour), two-factor after a reset
 .venv/bin/python tests/maintenance.py  # the background upkeep of titles and icons
-.venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end (pip install pytest)
+.venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end, project handovers (pip install pytest)
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
 node tools/check-i18n.mjs          # missing or broken Finnish and Swedish translations
 node tools/screenshots.mjs         # the README screenshots, from a demo instance on port 8014
