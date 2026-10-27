@@ -289,6 +289,9 @@ img.fav { background: var(--fav-plate, transparent); }
 .pl__badge--spotify { color: #1db954; }
 .pl__badge--youtube { color: #e53935; }
 .pl__pending { color: var(--accent); font-weight: 600; font-size: 12px; }
+.pl__list--deleting { opacity: .55; }
+.pl__list--deleting b { text-decoration: line-through; }
+.pl__deleting { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); margin-bottom: 8px; }
 .pl__detail { min-width: 0; }
 .pl__actions { gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
 .pl__items { margin-top: 8px; }

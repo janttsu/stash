@@ -102,7 +102,11 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   paths. Still to check: a real Spotify push and create, artist follow via /me/library (undocumented),
   YouTube quota use on a push, and the 7-day end of a *Testing* connection.
   Tokens are refreshed when expired; a failed refresh asks the user to connect again. Items with no id
-  (Spotify local files) are skipped.
+  (Spotify local files) are skipped. **Deleting a playlist** (2026-10-27): `playlists.deleting=1`
+  (`mark_delete`, `POST /lists/{id}/delete` and `/keep`, MCP `playlist_delete`) greys the list out; `push()` of
+  such a playlist calls `_delete_remote` (YouTube `DELETE /playlists?id=`, Spotify `DELETE /me/library?uris=`)
+  and drops the row; `sync_all` includes marked playlists and reports them in `deleted`. A Stash-only playlist
+  is forgotten at once. Test: `test_delete_marked_playlists_at_push_or_sync`.
 - **Subscriptions** (`app/subscriptions.py`, `static/js/subscriptions.js`, 2026-10-27): uses Playlists'
   connections, HTTP client (`_api`, retries) and progress record (key `(uid, "<service>:subscriptions")`).
   Tested against fakes (`tests/mcp/test_subscriptions.py`), not yet against the real services. Spotify's

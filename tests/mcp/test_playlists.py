@@ -58,6 +58,10 @@ class Fake:
             return forbidden
         if path == "/me":
             return httpx.Response(200, json={"id": "me", "display_name": "Me"})
+        if path == "/me/library":   # unfollowing a playlist is how Spotify deletes one
+            assert request.method == "DELETE"
+            self.spotify.pop(q["uris"].split(":")[-1], None)
+            return httpx.Response(200)
         if path == "/me/playlists":
             if request.method == "POST":
                 self.spotify["pl3"] = {"name": body["name"], "description": body["description"], "public": body["public"], "owner": "me", "tracks": []}
@@ -110,6 +114,9 @@ class Fake:
                 self.youtube[body["id"]].update({"title": body["snippet"]["title"], "description": body["snippet"]["description"],
                                                  "privacy": body["status"]["privacyStatus"]})
                 return httpx.Response(200, json={})
+            if request.method == "DELETE":
+                del self.youtube[q["id"]]
+                return httpx.Response(204)
             keys = [q["id"]] if "id" in q else list(self.youtube)
             return httpx.Response(200, json={"items": [
                 {"id": k, "etag": "e", "snippet": {"title": self.youtube[k]["title"], "description": self.youtube[k]["description"], "channelId": "UC1"},
@@ -271,6 +278,46 @@ def test_push_youtube_as_a_diff(api, stash, fake):
     assert r["pushed"]["removed"] == 1 and r["pushed"]["added"] == 1 and r["pushed"]["calls"] <= 5, "a diff, not a rewrite"
     d = web.get(f"/api/playlists/lists/{pid}").json()
     assert not d["playlist"]["dirty"] and [x["title"] for x in d["items"]] == ["Video 03", "Video 09", "Video 01"]
+
+
+def test_delete_marked_playlists_at_push_or_sync(api, stash, fake):
+    """A playlist marked for deletion stays, greyed, until a push or synchronise deletes it on the service."""
+    web = stash["web"]
+    connect(stash, "youtube")
+    connect(stash, "spotify")
+    web.post("/api/playlists/accounts/youtube/sync")
+    web.post("/api/playlists/accounts/spotify/sync")
+    by_name = lambda: {p["name"]: p for p in web.get("/api/playlists").json()["playlists"]}  # noqa: E731
+    live, chill, not_mine = by_name()["Live"], by_name()["Chill"], by_name()["Not mine"]
+    assert web.post(f"/api/playlists/lists/{not_mine['id']}/delete").status_code == 409, "someone else's"
+    fake.calls.clear()
+    assert web.post(f"/api/playlists/lists/{live['id']}/delete").json()["deleting"]
+    assert by_name()["Live"]["deleting"] and "PL1" in fake.youtube and not [c for c in fake.calls if c.startswith("DELETE")], \
+        "marked, nothing sent"
+    assert not web.post(f"/api/playlists/lists/{live['id']}/keep").json()["deleting"] and not by_name()["Live"]["deleting"]
+    web.post(f"/api/playlists/lists/{live['id']}/delete")
+    r = web.post("/api/playlists/accounts/youtube/sync-all").json()
+    assert r["deleted"] == ["Live"] and r["pushed"] == [] and "PL1" not in fake.youtube and "Live" not in by_name()
+    # a single push does the same for one playlist; Spotify deletes by unfollowing
+    web.post(f"/api/playlists/lists/{chill['id']}/delete")
+    r = web.post(f"/api/playlists/lists/{chill['id']}/push").json()
+    assert r["deleted"] == "Chill" and "DELETE api.spotify.com/v1/me/library" in fake.calls and "Chill" not in by_name()
+    # a Stash-only playlist has nothing on the service: forgotten at once
+    web.post("/api/playlists/takeout", json={"files": [{"name": "Watch later-videos.csv", "text": "Video ID,Playlist Video Creation Timestamp\nvidvidvid01,2026-01-01T00:00:00+00:00\n"}]})
+    wl = by_name()["Watch later"]
+    assert web.post(f"/api/playlists/lists/{wl['id']}/delete").json()["forgotten"] == wl["id"] and "Watch later" not in by_name()
+    # over MCP
+    mcp = Client(stash["raw"], new_key(stash)["key"])
+    web.post("/api/playlists/accounts/youtube/sync")   # nothing on YouTube now; create one to mark
+    fake.youtube["PL9"] = {"title": "Old", "description": "", "privacy": "private", "items": []}
+    web.post("/api/playlists/accounts/youtube/sync")
+    old = by_name()["Old"]
+    err, text = mcp.call("playlist_delete", playlist_id=old["id"])
+    assert not err and "marked for deletion" in text and "Nothing is sent now" in text
+    err, text = mcp.call("playlists_overview")
+    assert "marked for deletion" in text
+    err, text = mcp.call("playlist_delete", playlist_id=old["id"], keep=True)
+    assert not err and "kept" in text and not by_name()["Old"]["deleting"]
 
 
 def test_mcp_tools(api, stash, fake):

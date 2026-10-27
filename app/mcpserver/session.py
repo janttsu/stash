@@ -458,6 +458,7 @@ class Session:
             hidden = p["service"] == "spotify" and not p["editable"] and not p["count"]
             flags = (f", {p['pending']} pending changes" if p["pending"] else "") + ("" if p["editable"] else ", someone else's") \
                 + (", contents not readable on Spotify" if hidden else "") + (", gone from the service" if p["gone"] else "") \
+                + (", marked for deletion (deleted from the service at the next push or sync)" if p.get("deleting") else "") \
                 + (", only in Stash (Google Takeout; edits apply at once, nothing to push)" if p.get("local") else "")
             size = p["remote_count"] if hidden else p["count"]
             lines.append(f"P{p['id']} [{p['service']}] {p['name']} — {size} items{flags}")
@@ -488,6 +489,8 @@ class Session:
 
     def playlist_push(self, playlist_id: int) -> str:
         r = self.api.playlist_push(playlist_id)
+        if r.get("deleted"):
+            return f"Deleted {r['deleted']} from the service and from Stash."
         c = r["pushed"]
         return (f"Pushed: {c['added']} added, {c['removed']} removed" + (f", {c['moved']} moved" if c.get("moved") else "")
                 + f" ({c['calls']} calls to the service); fetched back.")
@@ -496,12 +499,22 @@ class Session:
         self.api.playlist_discard(playlist_id)
         return "Pending changes dropped; the playlist is as on the service."
 
+    def playlist_delete(self, playlist_id: int, keep: bool = False) -> str:
+        r = self.api.playlist_delete(playlist_id, keep)
+        if "forgotten" in r:
+            return "Forgotten: it was kept only in Stash, so there was nothing on the service to delete."
+        if keep:
+            return f"P{playlist_id} is kept: the deletion mark is taken back."
+        return (f"P{playlist_id} {r['name']} is marked for deletion. Nothing is sent now: it is deleted from the service "
+                "at the next playlist_push of it or playlists_sync with push_pending=true, after the user agrees.")
+
     def playlists_sync(self, service: str, force: bool = False, push_pending: bool = False) -> str:
         r = self.api.playlists_sync(service, force, push_pending)
         pushed = ""
         if push_pending:
             pushed = f"Pushed {len(r['pushed'])} playlists with pending changes" + (
                 f" ({', '.join(r['pushed'])})" if r["pushed"] else "") + (
+                f"; deleted from the service: {', '.join(r['deleted'])}" if r.get("deleted") else "") + (
                 "; push failed: " + "; ".join(f"{f['name']} ({f['error']})" for f in r["push_failed"])
                 if r["push_failed"] else "") + ". "
         skipped = f"; left alone because of pending changes: {', '.join(r['skipped_with_local_changes'])}" \

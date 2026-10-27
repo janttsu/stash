@@ -22,9 +22,10 @@ export async function renderPlaylists(container, params = {}) {
 
 /** Both ways: push every playlist's pending changes (after asking, naming them), then fetch everything. */
 async function syncAll(service, playlists) {
-  const pending = playlists.filter((p) => p.service === service && p.pending && p.editable && !p.gone);
+  const pending = playlists.filter((p) => p.service === service && (p.pending || p.deleting) && p.editable && !p.gone);
   if (pending.length && !await confirmBox(t('Push the pending changes of {n} playlists to {service} and then fetch everything back? {names}',
-    { n: pending.length, service: serviceName(service), names: pending.map((p) => p.name).join(', ') }), { okLabel: t('Synchronise') })) return;
+    { n: pending.length, service: serviceName(service), names: pending.map((p) => (p.deleting ? `${p.name} (${t('to be deleted')})` : p.name)).join(', ') }),
+  { okLabel: t('Synchronise') })) return;
   await fetchAll(service, { both: true });
 }
 
@@ -187,13 +188,14 @@ async function draw() {
       }) }, t('Disconnect'))));
 
   const listRow = (p) => h('button', {
-    type: 'button', class: view.playlist === p.id ? 'pl__list active' : 'pl__list',
+    type: 'button', class: `pl__list${view.playlist === p.id ? ' active' : ''}${p.deleting ? ' pl__list--deleting' : ''}`,
     onclick: () => { view.playlist = p.id; draw(); },
   }, h('b', null, p.name), h('span', { class: 'muted small' },
     ` · ${t('{n} items', { n: p.service === 'spotify' && !p.editable && !p.count ? p.remote_count : p.count })}`),
   p.pending ? h('span', { class: 'pl__pending' }, ` ${t('{n} pending', { n: p.pending })}`) : null,
   p.editable ? null : h('span', { class: 'muted small' }, ` · ${t('someone else’s')}`),
   p.gone ? h('span', { class: 'muted small' }, ` · ${t('gone from the service')}`) : null,
+  p.deleting ? h('span', { class: 'muted small' }, ` · ${t('to be deleted')}`) : null,
   p.local ? h('span', { class: 'muted small' }, ` · ${t('only in Stash')}`) : null);
 
   fill(root, h('section', { class: 'card pl__card' },
@@ -254,9 +256,18 @@ function playlistDetail(d) {
       p.editable && h('button', { type: 'button', class: 'btn', onclick: () => renameDialog(p, edit) }, t('Rename…')),
       p.editable && h('button', { type: 'button', class: 'btn', onclick: () => addDialog(p, edit) }, t('Add by link…'))),
     p.description && h('p', { class: 'muted small' }, p.description),
+    p.deleting ? h('div', { class: 'row pl__actions pl__deleting' },
+      h('span', { class: 'small grow' }, t('Marked for deletion: it is deleted from {service} at the next push or synchronise. Nothing is sent until then.', { service: serviceName(p.service) })),
+      h('button', { type: 'button', class: 'btn danger', onclick: () => act(async () => {
+        if (!await confirmBox(t('Delete “{name}” from {service} now?', { name: p.name, service: serviceName(p.service) }), { danger: true, okLabel: t('Delete') })) return;
+        await api('POST', `/api/playlists/lists/${p.id}/push`);
+        view.playlist = null;
+        toast(t('Deleted from {service}', { service: serviceName(p.service) }));
+      }) }, t('Delete now')),
+      h('button', { type: 'button', class: 'btn', onclick: () => act(() => api('POST', `/api/playlists/lists/${p.id}/keep`)) }, t('Keep'))) : null,
     h('div', { class: 'row pl__actions' },
       h('span', { class: 'muted small grow' }, p.dirty ? t('Pending changes: {text}', { text: pendingText || t('name or description') }) : t('No pending changes')),
-      p.dirty && h('button', { type: 'button', class: 'btn primary', onclick: () => act(async () => {
+      p.dirty && !p.deleting && h('button', { type: 'button', class: 'btn primary', onclick: () => act(async () => {
         if (!await confirmBox(t('Push these changes to {service}?', { service: serviceName(p.service) }), { okLabel: t('Push') })) return;
         const r = await api('POST', `/api/playlists/lists/${p.id}/push`);
         toast(t('Pushed: {added} added, {removed} removed', r.pushed));
@@ -265,8 +276,12 @@ function playlistDetail(d) {
         if (!await confirmBox(t('Drop the pending changes?'), { danger: true, okLabel: t('Drop') })) return;
         await api('POST', `/api/playlists/lists/${p.id}/discard`);
       }) }, t('Discard changes')),
-      !p.dirty && !p.gone && h('button', { type: 'button', class: 'btn', onclick: () => act(() => api('POST', `/api/playlists/lists/${p.id}/sync`)) },
+      !p.dirty && !p.gone && !p.deleting && h('button', { type: 'button', class: 'btn', onclick: () => act(() => api('POST', `/api/playlists/lists/${p.id}/sync`)) },
         p.local ? t('Read the titles again') : t('Fetch again')),
+      p.editable && !p.local && !p.gone && !p.deleting && h('button', { type: 'button', class: 'btn danger-quiet', onclick: () => act(async () => {
+        if (!await confirmBox(t('Delete “{name}” from {service}? It is only marked now, greyed out, and deleted there at the next push or synchronise; nothing is sent until then.', { name: p.name, service: serviceName(p.service) }), { danger: true, okLabel: t('Mark for deletion') })) return;
+        await api('POST', `/api/playlists/lists/${p.id}/delete`);
+      }) }, t('Delete from {service}…', { service: serviceName(p.service) })),
       h('button', { type: 'button', class: 'btn danger-quiet', onclick: () => act(async () => {
         if (!await confirmBox(t('Forget the copy in Stash? The playlist on the service is not touched.'), { danger: true, okLabel: t('Forget') })) return;
         await api('DELETE', `/api/playlists/lists/${p.id}`);

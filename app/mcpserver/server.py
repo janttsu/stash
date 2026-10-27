@@ -64,7 +64,9 @@ The ops run in order in one transaction.
 PLAYLISTS: the user's Spotify and YouTube playlists are copied into Stash (Playlists in the top bar). Work on
 the copy: `playlists_overview`, `playlist_show`, then `playlist_edit` with ops, which are pending until
 `playlist_push` writes them to the service. Show the user what will change and wait for their consent before
-pushing; `playlist_discard` drops pending changes. Items are referred to by their #item ids from playlist_show;
+pushing; `playlist_discard` drops pending changes. `playlist_delete` marks a whole playlist to be deleted from the
+service (greyed out in Stash) at the next push or sync, nothing is sent before; keep=true takes the mark back.
+Items are referred to by their #item ids from playlist_show;
 new items by address or id. Moving an item between playlists is a remove in one and an add in the other.
   {"op": "add", "items": ["https://…", "id"], "position": 0}   at the end when position is left out
   {"op": "remove", "ids": [12, 13]}        {"op": "move", "id": 12, "position": 0}
@@ -351,6 +353,13 @@ def build_server(origin: str) -> FastMCP:
     async def playlist_discard(ctx: Context, playlist_id: int) -> str:
         """Drop the pending changes of a playlist and fetch it again from the service."""
         return await run(ctx, "playlist_discard", playlist_id)
+
+    @mcp.tool()
+    async def playlist_delete(ctx: Context, playlist_id: int,
+                              keep: Annotated[bool, Field(description="true takes the deletion mark back")] = False) -> str:
+        """Mark a playlist to be deleted from the service (shown greyed out in Stash). Nothing is sent until
+        playlist_push or playlists_sync with push_pending=true, which the user must agree to."""
+        return await run(ctx, "playlist_delete", playlist_id, keep)
 
     @mcp.tool()
     async def playlists_sync(ctx: Context, service: Literal["spotify", "youtube"], force: bool = False,

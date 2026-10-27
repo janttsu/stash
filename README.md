@@ -356,6 +356,11 @@ of how many were fetched, how many items, which were left alone and which failed
 service refuses does not stop the others. A playlist deleted on the service stays in Stash marked *gone*, and
 **Export all** downloads everything as JSON, so the copy doubles as a backup.
 
+A whole playlist is deleted the same way as its items: **Delete from the service…** marks it (greyed out, *to be
+deleted*) and nothing happens on the service until you push that playlist or synchronise the service, when it
+is deleted there (on Spotify: unfollowed, which is how Spotify deletes) and dropped from Stash; **Keep** takes
+the mark back. **Forget copy** only drops Stash's copy and never touches the service.
+
 Each account connects its own developer app for each service (Stash never ships one): Playlists → **Connect…**
 shows the steps for Spotify (developer.spotify.com/dashboard → Create app → Web API → redirect URI → Client ID
 and secret) and for YouTube, and the exact redirect URI to paste:
@@ -394,6 +399,7 @@ playlist of your own on Spotify first. Stash uses Spotify's current calls (`/pla
 | `playlist_edit` | pending changes: `add` (addresses or ids, at a position), `remove`, `move`, `order`, `rename` |
 | `playlist_push` | writes the pending changes to the service; the assistant is told to ask first |
 | `playlist_discard` | drops the pending changes and fetches the playlist again |
+| `playlist_delete` | marks a playlist to be deleted from the service at the next push or synchronise (`keep=true` takes it back) |
 | `playlists_sync` | fetches every playlist of a service; `push_pending: true` first pushes all pending changes (a two-way sync, only with your consent) |
 | `playlist_create` | a new empty playlist on the service |
 

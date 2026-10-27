@@ -669,7 +669,7 @@ def playlist_json(r) -> dict:
     return {"id": r["id"], "service": r["service"], "external_id": r["external_id"], "name": r["name"],
             "description": r["description"], "public": bool(r["public"]), "editable": bool(r["editable"]),
             "owner": r["owner"], "remote_count": r["remote_count"], "synced_at": r["synced_at"], "dirty": bool(r["dirty"]),
-            "gone": bool(r["gone"]), "local": bool(r["local"]),
+            "gone": bool(r["gone"]), "local": bool(r["local"]), "deleting": bool(r["deleting"]),
             "url": "" if r["local"] else (f"https://open.spotify.com/playlist/{r['external_id']}" if r["service"] == "spotify"
                                           else f"https://www.youtube.com/playlist?list={r['external_id']}")}
 
@@ -678,7 +678,7 @@ def overview(c: Ctx) -> dict:
     rows = c.con.execute(
         "SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id AND i.state<>'removed') AS count,"
         " (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id AND i.state<>'synced') AS pending"
-        " FROM playlists p WHERE p.user_id=? ORDER BY p.service, p.gone, p.name COLLATE NOCASE", (c.uid,)).fetchall()
+        " FROM playlists p WHERE p.user_id=? ORDER BY p.service, p.gone, p.deleting, p.name COLLATE NOCASE", (c.uid,)).fetchall()
     return {"accounts": accounts(c),
             "playlists": [playlist_json(r) | {"count": r["count"], "pending": r["pending"]} for r in rows]}
 
@@ -824,16 +824,16 @@ def sync_all(c: Ctx, service: str) -> dict:
     if not acc or not acc["access_token"]:
         raise err(409, f"not_connected: connect {service} first on the Playlists page")
     key = (c.uid, service)
-    dirty = c.con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service=? AND dirty>0 AND editable=1"
-                          " AND gone=0 ORDER BY name COLLATE NOCASE", (c.uid, service)).fetchall()
-    pushed, push_failed = [], []
+    dirty = c.con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service=? AND (dirty>0 OR deleting=1)"
+                          " AND editable=1 AND gone=0 ORDER BY name COLLATE NOCASE", (c.uid, service)).fetchall()
+    pushed, push_failed, deleted = [], [], []
     _set_progress(key, running=True, phase="push", done=0, total=len(dirty), name="", items=0)
     try:
         for n, row in enumerate(dirty):
             _set_progress(key, done=n, name=row["name"])
             try:
-                push(c, row["id"], track=False)
-                pushed.append(row["name"])
+                r = push(c, row["id"], track=False)
+                (deleted if r.get("deleted") else pushed).append(row["name"])
             except ServiceError as e:
                 if e.status in (401, 429) or problem_code(c, e).startswith("youtube_api_disabled"):
                     raise
@@ -842,16 +842,47 @@ def sync_all(c: Ctx, service: str) -> dict:
         fetched = _pull(c, service, acc, key, None, False)
     finally:
         _set_progress(key, running=False)
-    return fetched | {"pushed": pushed, "push_failed": push_failed}
+    return fetched | {"pushed": pushed, "push_failed": push_failed, "deleted": deleted}
+
+
+def mark_delete(c: Ctx, playlist_id: int, keep: bool = False) -> dict:
+    """Mark a playlist to be deleted from the service at the next push or synchronise, or take the mark back
+    (keep=True). Nothing is sent until then. A Stash-only playlist has nothing on the service: it is forgotten at
+    once."""
+    row = playlist(c, playlist_id)
+    if row["local"]:
+        return {"id": playlist_id, "deleting": False} if keep else forget(c, playlist_id) | {"deleting": False}
+    if not row["editable"]:
+        raise err(409, "not_editable: this playlist belongs to someone else")
+    with db.tx(c.con):
+        c.con.execute("UPDATE playlists SET deleting=? WHERE id=?", (0 if keep else 1, playlist_id))
+    return {"id": playlist_id, "name": row["name"], "deleting": not keep}
+
+
+def _delete_remote(c: Ctx, row) -> dict:
+    """A playlist marked for deletion: gone from the service (YouTube deletes it; on Spotify a playlist is
+    "deleted" by unfollowing it, through /me/library since February 2026), then from Stash."""
+    service, api = row["service"], PROVIDERS[row["service"]]["api"]
+    with _api(c, service) as http:
+        if service == "spotify":
+            _check(service, http.delete(f"{api}/me/library", params={"uris": f"spotify:playlist:{row['external_id']}"}))
+        else:
+            _check(service, http.delete(f"{api}/playlists", params={"id": row["external_id"]}))
+    with db.tx(c.con):
+        c.con.execute("DELETE FROM playlists WHERE id=?", (row["id"],))
+    return {"deleted": row["name"], "pushed": {"added": 0, "removed": 0, "calls": 1}, "fetched": 0}
 
 
 def push(c: Ctx, playlist_id: int, *, track: bool = True) -> dict:
-    """Make the service's playlist match the local one (items, order, name), then fetch it back."""
+    """Make the service's playlist match the local one (items, order, name), then fetch it back. A playlist
+    marked for deletion is deleted from the service instead."""
     row = playlist(c, playlist_id)
     if row["local"]:
         raise err(409, "local_playlist: this playlist is kept only in Stash and has nothing to push to")
     if not row["editable"]:
         raise err(409, "not_editable: this playlist belongs to someone else")
+    if row["deleting"]:
+        return _delete_remote(c, row)
     service, api = row["service"], PROVIDERS[row["service"]]["api"]
     con = c.con
     items = con.execute("SELECT * FROM playlist_items WHERE playlist_id=? ORDER BY position, id", (playlist_id,)).fetchall()
@@ -1196,6 +1227,16 @@ def web_push(playlist_id: int, c: Ctx = Depends(ctx)):
 @session_api.post("/lists/{playlist_id}/sync")
 def web_sync_one(playlist_id: int, force: bool = False, c: Ctx = Depends(ctx)):
     return _service_errors(c, lambda: pull(c, playlist(c, playlist_id)["service"], playlist_id, force))
+
+
+@session_api.post("/lists/{playlist_id}/delete")
+def web_mark_delete(playlist_id: int, c: Ctx = Depends(ctx)):
+    return mark_delete(c, playlist_id)
+
+
+@session_api.post("/lists/{playlist_id}/keep")
+def web_keep(playlist_id: int, c: Ctx = Depends(ctx)):
+    return mark_delete(c, playlist_id, keep=True)
 
 
 @session_api.delete("/lists/{playlist_id}")
