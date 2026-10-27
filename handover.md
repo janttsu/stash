@@ -71,7 +71,7 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
 - MCP tests share one session per API key, so a test that makes sets (S1, S2) should use its own key
   (`new_key(stash)`), or it shifts the numbering for the other test files.
 
-## State of the parts (2026-10-26)
+## State of the parts (2026-10-27)
 
 - **Accounts, e-mail, password reset**: done, tests in `tests/account.py`.
 - **Open tabs** (`app/tabs.py`, `static/js/tabs.js`, extension menu "Send all open tabs to Stash" which opens
@@ -139,6 +139,12 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
 
 ## Next steps that were discussed or seem likely
 
-- Try Playlists against real Spotify and YouTube accounts and fix what the fakes did not predict.
+- Playlists and Subscriptions have now run against the owner's real YouTube and Spotify accounts (fetch,
+  Takeout-style Stash-only lists, the activity check, a single unsubscribe); a real push of playlist
+  changes, a playlist create and a playlist deletion on the services have not been exercised yet (the
+  owner's Stash-only lists are to be published to YouTube on request: create each on the service, add the
+  videos, then delete the old lists that are marked for deletion). Spotify's long pause ends on 2026-10-28.
+- A YouTube watch-history import (Google Takeout's history file) was discussed: it would tell which
+  channels are watched most, to tidy playlists and subscriptions by use.
 - Tags, notes or a "why" on open tabs could be richer; the assistant currently gets one note field.
 - `tests/ui.mjs` could be run from a laptop against the server before releases, since it cannot run there.

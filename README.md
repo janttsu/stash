@@ -26,10 +26,12 @@ without handing it to anyone.
    - **Open tabs**: a browser's open tabs sent to Stash to be sorted out later, so the browser can be emptied
      with nothing lost (see *Open tabs* below).
    - **Playlists**: your Spotify and YouTube playlists copied into Stash, edited here (by hand or by the
-     assistant) and pushed back to the service; the copy is also a backup (see *Playlists* below).
-   - **Subscriptions**: YouTube channel subscriptions and Spotify's followed artists and playlists, with your
-     own tags and notes, a check for channels that have gone quiet, and subscribing or unsubscribing as pending
-     changes (see *Subscriptions* below).
+     assistant) and pushed back to the service; a whole playlist can be marked for deletion the same way;
+     Google Takeout lists (Watch later) live only in Stash; the copy is also a backup (see *Playlists* below).
+   - **Subscriptions**: YouTube channel subscriptions and Spotify's followed artists and playlists, grouped by
+     your own topic tags so that hundreds of channels stay findable, with notes, a check for channels that
+     have gone quiet (kept current by a scheduled task), and subscribing or unsubscribing as pending changes
+     (see *Subscriptions* below).
    - **AI**: one section for everything about assistants and the tools that work with Stash from outside:
      connecting one (the MCP address, keys and your standing rules), what it can do, the handovers it saves,
      the changes it made (each undoable), and **Tools**: a list of every tool with where it is set up, the link
