@@ -457,7 +457,8 @@ class Session:
         for p in data["playlists"]:
             hidden = p["service"] == "spotify" and not p["editable"] and not p["count"]
             flags = (f", {p['pending']} pending changes" if p["pending"] else "") + ("" if p["editable"] else ", someone else's") \
-                + (", contents not readable on Spotify" if hidden else "") + (", gone from the service" if p["gone"] else "")
+                + (", contents not readable on Spotify" if hidden else "") + (", gone from the service" if p["gone"] else "") \
+                + (", only in Stash (Google Takeout; edits apply at once, nothing to push)" if p.get("local") else "")
             size = p["remote_count"] if hidden else p["count"]
             lines.append(f"P{p['id']} [{p['service']}] {p['name']} — {size} items{flags}")
         return "\n".join(lines)

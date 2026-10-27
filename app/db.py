@@ -246,6 +246,7 @@ CREATE TABLE IF NOT EXISTS playlists (
     synced_at    INTEGER,
     dirty        INTEGER NOT NULL DEFAULT 0,
     gone         INTEGER NOT NULL DEFAULT 0,
+    local        INTEGER NOT NULL DEFAULT 0,   -- only in Stash (imported from Google Takeout): never fetched or pushed
     UNIQUE (user_id, service, external_id)
 );
 CREATE TABLE IF NOT EXISTS playlist_items (
@@ -388,6 +389,8 @@ def init() -> None:
             con.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
         if "unavailable" not in {r[1] for r in con.execute("PRAGMA table_info(playlist_items)")}:
             con.execute("ALTER TABLE playlist_items ADD COLUMN unavailable INTEGER NOT NULL DEFAULT 0")
+        if "local" not in {r[1] for r in con.execute("PRAGMA table_info(playlists)")}:
+            con.execute("ALTER TABLE playlists ADD COLUMN local INTEGER NOT NULL DEFAULT 0")
         # one address, one account (case does not matter); accounts without an address are not compared
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(email COLLATE NOCASE) WHERE email <> ''")
         # these indexes reference the columns added just above, so they come after the migration

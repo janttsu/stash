@@ -165,6 +165,8 @@ async function draw() {
         title: t('Only fetch: playlists with pending changes are left alone'),
       }, t('Fetch playlists')),
       a.connected && h('button', { type: 'button', class: 'btn', onclick: () => createDialog(a.service) }, t('New playlist…')),
+      a.service === 'youtube' && h('button', { type: 'button', class: 'btn', onclick: () => takeoutDialog(),
+        title: t('Watch later and other lists YouTube’s API does not give') }, t('Import from Google Takeout…')),
       h('button', { type: 'button', class: 'btn', onclick: () => connectDialog(a) }, a.connected ? t('Connect again…') : t('Connect…')),
       a.connected && h('button', { type: 'button', class: 'btn danger-quiet', onclick: () => act(async () => {
         if (!await confirmBox(t('Disconnect {service}? The playlists fetched so far stay in Stash.', { service: serviceName(a.service) }))) return;
@@ -178,7 +180,8 @@ async function draw() {
     ` · ${t('{n} items', { n: p.service === 'spotify' && !p.editable && !p.count ? p.remote_count : p.count })}`),
   p.pending ? h('span', { class: 'pl__pending' }, ` ${t('{n} pending', { n: p.pending })}`) : null,
   p.editable ? null : h('span', { class: 'muted small' }, ` · ${t('someone else’s')}`),
-  p.gone ? h('span', { class: 'muted small' }, ` · ${t('gone from the service')}`) : null);
+  p.gone ? h('span', { class: 'muted small' }, ` · ${t('gone from the service')}`) : null,
+  p.local ? h('span', { class: 'muted small' }, ` · ${t('only in Stash')}`) : null);
 
   fill(root, h('section', { class: 'card pl__card' },
     h('div', { class: 'row' },
@@ -232,7 +235,9 @@ function playlistDetail(d) {
 
   return h('div', { class: 'pl__detail' },
     h('div', { class: 'row' },
-      h('h3', { class: 'grow' }, p.name, ' ', h('a', { href: safeHref(p.url), target: '_blank', rel: 'noopener noreferrer', class: 'small' }, t('open on {service}', { service: serviceName(p.service) }))),
+      h('h3', { class: 'grow' }, p.name, ' ', p.local
+        ? h('span', { class: 'muted small' }, t('only in Stash (Google Takeout): changes take effect at once and are not sent to YouTube'))
+        : h('a', { href: safeHref(p.url), target: '_blank', rel: 'noopener noreferrer', class: 'small' }, t('open on {service}', { service: serviceName(p.service) }))),
       p.editable && h('button', { type: 'button', class: 'btn', onclick: () => renameDialog(p, edit) }, t('Rename…')),
       p.editable && h('button', { type: 'button', class: 'btn', onclick: () => addDialog(p, edit) }, t('Add by link…'))),
     p.description && h('p', { class: 'muted small' }, p.description),
@@ -247,7 +252,8 @@ function playlistDetail(d) {
         if (!await confirmBox(t('Drop the pending changes?'), { danger: true, okLabel: t('Drop') })) return;
         await api('POST', `/api/playlists/lists/${p.id}/discard`);
       }) }, t('Discard changes')),
-      !p.dirty && !p.gone && h('button', { type: 'button', class: 'btn', onclick: () => act(() => api('POST', `/api/playlists/lists/${p.id}/sync`)) }, t('Fetch again')),
+      !p.dirty && !p.gone && h('button', { type: 'button', class: 'btn', onclick: () => act(() => api('POST', `/api/playlists/lists/${p.id}/sync`)) },
+        p.local ? t('Read the titles again') : t('Fetch again')),
       h('button', { type: 'button', class: 'btn danger-quiet', onclick: () => act(async () => {
         if (!await confirmBox(t('Forget the copy in Stash? The playlist on the service is not touched.'), { danger: true, okLabel: t('Forget') })) return;
         await api('DELETE', `/api/playlists/lists/${p.id}`);
@@ -287,6 +293,35 @@ async function renameDialog(p, edit) {
   ]);
   if (!ok) return;
   await edit([{ op: 'rename', name: name.value.trim(), description: description.value, public: pub.checked }]);
+}
+
+/** Watch later (and any other list) from Google Takeout: YouTube's API has not given Watch later since 2016. */
+async function takeoutDialog() {
+  const input = h('input', { type: 'file', accept: '.csv,text/csv', multiple: true });
+  const ok = await openModal(t('Import from Google Takeout'), h('div', { class: 'form' },
+    h('p', null, t('YouTube’s API does not give Watch later (Google closed it in 2016), but Google’s own data export does. Each file becomes a playlist kept only in Stash, with titles read from YouTube; importing the same file later updates it.')),
+    h('ol', { class: 'pl__guide-steps' },
+      h('li', null, t('Open takeout.google.com and press “Deselect all”.')),
+      h('li', null, t('Tick “YouTube and YouTube Music”, press “All YouTube data included”, leave only “playlists” ticked, and press OK.')),
+      h('li', null, t('Press “Next step”, then “Create export”. Google mails a link when it is ready, usually within minutes.')),
+      h('li', null, t('Download and unzip it. The files are in “YouTube and YouTube Music/playlists/”: “Watch later-videos.csv” (in Finnish exports “Katso myöhemmin…”) and one file per playlist.')),
+      h('li', null, t('Choose the files below. Watch later is enough, but you can add others too.'))),
+    h('label', { class: 'field' }, h('span', null, t('CSV files')), input)), [
+    { label: t('Cancel') },
+    { label: t('Import'), kind: 'primary', action: () => input.files.length > 0 },
+  ], { wide: true });
+  if (!ok) return;
+  await attempt(async () => {
+    const files = await Promise.all([...input.files].map(async (f) => ({ name: f.name, text: await f.text() })));
+    const r = await api('POST', '/api/playlists/takeout', { files });
+    const parts = r.imported.map((x) => t('{name}: {n} videos', { name: x.file, n: x.videos })
+      + (x.unavailable ? ` (${t('{n} no longer on YouTube', { n: x.unavailable })})` : ''));
+    if (r.failed.length) parts.push(t('Not a Takeout playlist file: {names}', { names: r.failed.map((x) => x.file).join(', ') }));
+    toast(parts.join(' · '), r.failed.length && !r.imported.length ? 'error' : '');
+    view.service = 'youtube';
+    if (r.imported.length) view.playlist = r.imported[0].playlist_id;
+    await draw();
+  });
 }
 
 async function createDialog(service) {

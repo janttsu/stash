@@ -300,8 +300,19 @@ alone until they are pushed or discarded. The page has one tab per service. Ever
 video's title from the video itself, so a renamed video is renamed in Stash; a video that has been deleted or
 made private keeps the last title Stash saw, marked as such, instead of YouTube's "Deleted video". When a
 service answers *429 Too Many Requests*, Stash waits as long as it asks (shown on the progress bar) and goes on;
-a wait of more than three minutes ends the fetch with a message saying how long to wait. YouTube's *Watch later*
-and history cannot be read through its API (Google closed them in 2016). **Synchronise** does both ways for a whole service: it pushes the
+a wait of more than three minutes ends the fetch with a message saying how long to wait.
+
+YouTube's *Watch later* cannot be read through its API (Google closed it, and the history, in 2016), but
+Google Takeout exports it. On the YouTube tab, **Import from Google Takeout…** shows the steps: at
+takeout.google.com deselect all, tick *YouTube and YouTube Music*, keep only *playlists*, create the export,
+unzip it, and choose `Watch later-videos.csv` (and any other playlist files) from
+`YouTube and YouTube Music/playlists/`. Each file becomes a playlist kept **only in Stash**: titles, channels and
+lengths are read from YouTube (1 quota unit per 50 videos), edits take effect at once, nothing is ever sent to
+YouTube, account fetches leave it alone, *Read the titles again* refreshes them, and importing the same file
+again replaces its contents. Both the older Takeout format ("Video Id, Time Added" after a few lines about the
+playlist) and the newer one ("Video ID, Playlist Video Creation Timestamp") are read.
+
+**Synchronise** does both ways for a whole service: it pushes the
 pending changes of every playlist (after asking, and naming them), then fetches everything back; a push that
 fails is listed and its changes stay pending. Right after connecting, the first fetch starts by itself. A fetch
 shows a progress bar (playlist *n* of *m*, its name, items so far) and ends with a summary: how many playlists

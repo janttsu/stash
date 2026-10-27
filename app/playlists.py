@@ -508,6 +508,8 @@ def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = 
     if not acc or not acc["access_token"]:
         raise err(409, f"not_connected: connect {service} first on the Playlists page")
     key = (c.uid, service)
+    if playlist_id is not None and playlist(c, playlist_id)["local"]:
+        return refresh_local(c, playlist_id)
     if not track:
         return _pull(c, service, acc, None, playlist_id, force)
     _set_progress(key, running=True, phase="fetch", done=0, total=0, name="", items=0)
@@ -599,8 +601,9 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
                 _store_items(con, pid, items)
             fetched += 1
         if playlist_id is None:
-            with db.tx(con):   # playlists no longer on the service stay as a copy, marked gone
-                for r in con.execute("SELECT id, external_id FROM playlists WHERE user_id=? AND service=?", (c.uid, service)).fetchall():
+            with db.tx(con):   # playlists no longer on the service stay as a copy, marked gone (not Stash-only ones)
+                for r in con.execute("SELECT id, external_id FROM playlists WHERE user_id=? AND service=? AND local=0",
+                                     (c.uid, service)).fetchall():
                     con.execute("UPDATE playlists SET gone=? WHERE id=?", (int(r["external_id"] not in seen), r["id"]))
                 con.execute("UPDATE playlist_accounts SET synced_at=? WHERE id=?", (t, acc["id"]))
     return {"service": service, "total": len(wanted), "fetched": fetched, "items": item_count,
@@ -620,8 +623,9 @@ def playlist_json(r) -> dict:
     return {"id": r["id"], "service": r["service"], "external_id": r["external_id"], "name": r["name"],
             "description": r["description"], "public": bool(r["public"]), "editable": bool(r["editable"]),
             "owner": r["owner"], "remote_count": r["remote_count"], "synced_at": r["synced_at"], "dirty": bool(r["dirty"]),
-            "gone": bool(r["gone"]), "url": (f"https://open.spotify.com/playlist/{r['external_id']}" if r["service"] == "spotify"
-                                              else f"https://www.youtube.com/playlist?list={r['external_id']}")}
+            "gone": bool(r["gone"]), "local": bool(r["local"]),
+            "url": "" if r["local"] else (f"https://open.spotify.com/playlist/{r['external_id']}" if r["service"] == "spotify"
+                                          else f"https://www.youtube.com/playlist?list={r['external_id']}")}
 
 
 def overview(c: Ctx) -> dict:
@@ -740,13 +744,21 @@ def edit(c: Ctx, playlist_id: int, ops: list[dict]) -> dict:
             else:
                 raise err(422, f"bad_op: {kind}")
         _renumber(con, playlist_id)
-        _mark_dirty(con, playlist_id)
+        if row["local"]:
+            # a Stash-only playlist has no service to wait for: the change is the new state at once
+            con.execute("DELETE FROM playlist_items WHERE playlist_id=? AND state='removed'", (playlist_id,))
+            _renumber(con, playlist_id)
+            con.execute("UPDATE playlist_items SET state='synced', remote_position=position WHERE playlist_id=?", (playlist_id,))
+            con.execute("UPDATE playlists SET dirty=0 WHERE id=?", (playlist_id,))
+        else:
+            _mark_dirty(con, playlist_id)
     return counts
 
 
 def discard(c: Ctx, playlist_id: int) -> dict:
     """Drop the pending changes: back to what was last fetched from the service."""
-    playlist(c, playlist_id)
+    if playlist(c, playlist_id)["local"]:
+        raise err(409, "local_playlist: changes to a playlist kept only in Stash take effect at once")
     con = c.con
     with db.tx(con):
         con.execute("DELETE FROM playlist_items WHERE playlist_id=? AND state='added'", (playlist_id,))
@@ -790,6 +802,8 @@ def sync_all(c: Ctx, service: str) -> dict:
 def push(c: Ctx, playlist_id: int, *, track: bool = True) -> dict:
     """Make the service's playlist match the local one (items, order, name), then fetch it back."""
     row = playlist(c, playlist_id)
+    if row["local"]:
+        raise err(409, "local_playlist: this playlist is kept only in Stash and has nothing to push to")
     if not row["editable"]:
         raise err(409, "not_editable: this playlist belongs to someone else")
     service, api = row["service"], PROVIDERS[row["service"]]["api"]
@@ -879,6 +893,105 @@ def create(c: Ctx, service: str, name: str, description: str = "", public: bool 
     return {"id": pid, "external_id": external_id, "name": name}
 
 
+# --- Google Takeout: YouTube lists the API does not give (Watch later) ---------------------------------------
+#
+# YouTube's API has returned nothing for Watch later (and history) since 2016, but Google Takeout exports it,
+# with every other playlist, as one CSV file per playlist under "YouTube and YouTube Music/playlists/". Older
+# exports start with a few lines about the playlist before the header "Video Id,Time Added"; newer ones are a
+# plain table with "Video ID" and "Playlist Video Creation Timestamp". Either is read here.
+
+MAX_TAKEOUT_BYTES = 5_000_000
+_TAKEOUT_SUFFIX = re.compile(r"(-videos)?\.csv$", re.I)
+
+
+def parse_takeout_csv(text: str) -> list[tuple[str, Optional[int]]]:
+    """(video id, added at) in the file's order, without repeats; [] when the file has no video id column."""
+    import csv
+    import io
+
+    rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
+    for i, row in enumerate(rows):
+        names = [c.strip().lower() for c in row]
+        col = next((j for j, n in enumerate(names) if n in ("video id", "video-id", "videoid")), None)
+        if col is None:
+            continue
+        when = next((j for j, n in enumerate(names) if "time" in n or "timestamp" in n or "added" in n), None)
+        out, seen = [], set()
+        for r in rows[i + 1:]:
+            vid = r[col].strip() if col < len(r) else ""
+            if not re.match(r"^[A-Za-z0-9_-]{11}$", vid) or vid in seen:
+                continue
+            seen.add(vid)
+            stamp = _iso_time(r[when].strip().replace(" UTC", "").replace(" ", "T")) if when is not None and when < len(r) else None
+            out.append((vid, stamp))
+        return out
+    return []
+
+
+def _local_items(c: Ctx, ids: list[tuple[str, Optional[int]]]) -> list[dict]:
+    items = [{"item_id": vid, "remote_id": "", "title": vid, "artist": "", "duration_ms": 0, "added_at": when,
+              "url": item_url("youtube", vid), "unavailable": 0} for vid, when in ids]
+    acc = account(c, "youtube")
+    if acc and acc["access_token"] and items:
+        with _api(c, "youtube") as http:
+            videos = _youtube_videos(http, [x["item_id"] for x in items])
+        for x in items:
+            v = videos.get(x["item_id"])
+            if v:
+                x.update(title=v["title"] or x["title"], artist=v["artist"], duration_ms=v["duration_ms"])
+            else:
+                x["unavailable"] = 1
+    return items
+
+
+def import_takeout(c: Ctx, files: list[dict]) -> dict:
+    """Each CSV becomes a YouTube playlist kept only in Stash, named after the file; importing the same file name
+    again updates that playlist. Titles, channels and lengths come from YouTube when it is connected (1 quota
+    unit per 50 videos); a video it no longer has keeps the title Stash saw before, marked unavailable."""
+    out, con, t = [], c.con, db.now()
+    for f in files[:50]:
+        name = _TAKEOUT_SUFFIX.sub("", clean_text(str(f.get("name", "")).rsplit("/", 1)[-1], 150)) or "Takeout"
+        text = str(f.get("text", ""))
+        if len(text) > MAX_TAKEOUT_BYTES:
+            out.append({"file": name, "error": "too_large"})
+            continue
+        ids = parse_takeout_csv(text)
+        if not ids:
+            out.append({"file": name, "error": "no_video_ids"})
+            continue
+        items = _local_items(c, ids)
+        external = "stash:takeout:" + re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")[:80]
+        with db.tx(con):
+            row = con.execute("SELECT id FROM playlists WHERE user_id=? AND service='youtube' AND external_id=?",
+                              (c.uid, external)).fetchone()
+            if row:
+                pid = row[0]
+                con.execute("UPDATE playlists SET name=?, remote_count=?, synced_at=?, dirty=0, gone=0 WHERE id=?",
+                            (name, len(items), t, pid))
+            else:
+                pid = con.execute(
+                    "INSERT INTO playlists(user_id, service, external_id, name, description, public, editable, owner,"
+                    " remote_count, synced_at, local) VALUES(?,?,?,?,?,0,1,'',?,?,1)",
+                    (c.uid, "youtube", external, name, "Google Takeout", len(items), t)).lastrowid
+            _store_items(con, pid, items)
+        out.append({"file": name, "playlist_id": pid, "videos": len(items),
+                    "unavailable": sum(x["unavailable"] for x in items), "updated": bool(row)})
+    return {"imported": [x for x in out if "error" not in x], "failed": [x for x in out if "error" in x]}
+
+
+def refresh_local(c: Ctx, playlist_id: int) -> dict:
+    """Read the titles of a Stash-only playlist's videos from YouTube again."""
+    con = c.con
+    rows = con.execute("SELECT item_id, added_at FROM playlist_items WHERE playlist_id=? ORDER BY position, id",
+                       (playlist_id,)).fetchall()
+    items = _local_items(c, [(r["item_id"], r["added_at"]) for r in rows])
+    with db.tx(con):
+        _store_items(con, playlist_id, items)
+        con.execute("UPDATE playlists SET synced_at=?, remote_count=? WHERE id=?", (db.now(), len(items), playlist_id))
+    return {"service": "youtube", "total": 1, "fetched": 1, "items": len(items), "skipped_with_local_changes": [],
+            "failed": [], "metadata_only": []}
+
+
 def forget(c: Ctx, playlist_id: int) -> dict:
     """Remove the local copy only. The playlist on the service is not touched."""
     playlist(c, playlist_id)
@@ -942,6 +1055,20 @@ def _service_errors(c: Ctx, fn):
 @session_api.get("")
 def web_overview(c: Ctx = Depends(ctx)):
     return overview(c)
+
+
+class TakeoutFile(BaseModel):
+    name: str = Field(max_length=300)
+    text: str = Field(max_length=MAX_TAKEOUT_BYTES)
+
+
+class Takeout(BaseModel):
+    files: list[TakeoutFile] = Field(min_length=1, max_length=50)
+
+
+@session_api.post("/takeout")
+def web_takeout(body: Takeout, c: Ctx = Depends(ctx)):
+    return _service_errors(c, lambda: import_takeout(c, [f.model_dump() for f in body.files]))
 
 
 @session_api.get("/export")

@@ -77,7 +77,13 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   fetch reports progress through `GET /api/playlists/accounts/<service>/progress` (in-memory, one process)
   and returns a summary (`total`, `fetched`, `items`, `skipped_with_local_changes`, `failed`). `sync_all()`
   (`POST …/sync-all`, the page's *Synchronise*, MCP `playlists_sync(push_pending=true)`) pushes every dirty
-  playlist first (progress phase `push`) and adds `pushed` and `push_failed`. **Spotify's February 2026
+  playlist first (progress phase `push`) and adds `pushed` and `push_failed`. **Google Takeout import**
+  (`import_takeout`, `POST /api/playlists/takeout`, 2026-10-27): Watch later is not in YouTube's API, so
+  Takeout CSVs become `playlists.local=1` rows (external_id `stash:takeout:<name>`): edits apply at once,
+  push/discard refuse, account fetches skip them, a single fetch re-reads titles (`refresh_local`). Not yet
+  tried with the owner's real Takeout file: check the header names of a Finnish export. Also since 2026-10-27:
+  429 handling with Retry-After (`_Client.send`, `MIN_INTERVAL` pacing for Spotify), YouTube titles from
+  videos.list with `playlist_items.unavailable` keeping the last real title. **Spotify's February 2026
   Development Mode changes** (developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)
   broke the first real Spotify fetch (every `/playlists/{id}/tracks` → 403): now `/items` with `item`,
   `spotify_total()` for the renamed size field, per-track `/tracks/{id}` (no `/tracks?ids=`), `POST
