@@ -275,14 +275,21 @@ def _resolve(http, service: str, kind: str, ref: str) -> Optional[dict]:
     """The id and title for an address the user gave; None when the service does not know it."""
     api = PROVIDERS[service]["api"]
     if service == "youtube" and kind == "channel":
-        params = {"part": "snippet,contentDetails,statistics"}
+        part = {"part": "snippet,contentDetails,statistics"}
         if ref.startswith("handle:"):
-            params["forHandle"] = ref.split(":", 1)[1]
+            tries = [{"forHandle": ref.split(":", 1)[1]}]
         elif ref.startswith("user:"):
-            params["forUsername"] = ref.split(":", 1)[1]
+            # /c/<name> and /user/<name> addresses: the custom name has usually become the channel's handle, and
+            # the older ones are legacy usernames; each look-up is one quota unit
+            name = ref.split(":", 1)[1]
+            tries = [{"forHandle": f"@{name}"}, {"forUsername": name}]
         else:
-            params["id"] = ref
-        items = _check(service, http.get(f"{api}/channels", params=params)).get("items", [])
+            tries = [{"id": ref}]
+        items = []
+        for params in tries:
+            items = _check(service, http.get(f"{api}/channels", params=part | params)).get("items", [])
+            if items:
+                break
         if not items:
             return None
         ch = items[0]

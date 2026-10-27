@@ -6,8 +6,9 @@
                 look up when YouTube channels last published, each channel about once a day
   duplicates    daily: tag the later copies of the same address "duplicate", never the oldest one
   youtube-push  daily, after YouTube's quota reset: the pending changes of YouTube playlists (a published
-                Stash-only playlist's videos, removals, renames) and then the deletions of playlists marked
-                for it, at most PUSH_BATCH writes a run since each costs 50 of the day's 10 000 units
+                Stash-only playlist's videos, removals, renames), then the deletions of playlists marked
+                for it, then pending subscribes and unsubscribes when the rest of the budget covers them;
+                at most PUSH_BATCH writes a run since each costs 50 of the day's 10 000 units
 
     .venv/bin/python -m app.cli job media-sync
     .venv/bin/python -m app.cli job duplicates
@@ -170,7 +171,7 @@ def youtube_push() -> dict:
     that is spent, or a pause YouTube asks for, ends the run without counting as a failure: the next run goes
     on from where this one stopped, since every write is recorded as soon as it is done."""
     from . import main  # noqa: F401
-    from . import playlists
+    from . import playlists, subscriptions
 
     con = db.connect()
     lines, failures = [], 0
@@ -184,9 +185,19 @@ def youtube_push() -> dict:
             who = f"{c.user['username']}/youtube"
             try:
                 r = playlists.push_batch(c, PUSH_BATCH)
-                lines.append(f"{who}: {r['writes']} writes, {len(r['completed'])} playlists complete, {r['remaining']} items"
-                             f" still pending, {len(r['deleted'])} playlists deleted"
-                             + (f", refused by YouTube: {len(r['failed'])}" if r["failed"] else ""))
+                line = (f"{who}: {r['writes']} writes, {len(r['completed'])} playlists complete, {r['remaining']} items"
+                        f" still pending, {len(r['deleted'])} playlists deleted"
+                        + (f", refused by YouTube: {len(r['failed'])}" if r["failed"] else ""))
+                # pending subscribes and unsubscribes go too, when the rest of the budget covers them all
+                waiting = con.execute("SELECT COUNT(*) FROM subscriptions WHERE user_id=? AND service='youtube'"
+                                      " AND state IN ('added', 'removed')", (c.uid,)).fetchone()[0]
+                if 0 < waiting <= PUSH_BATCH - r["writes"]:
+                    s = subscriptions.sync(c, "youtube", push=True)
+                    line += f"; {len(s['pushed'])} subscription changes sent" + (
+                        f", {len(s['push_failed'])} refused" if s["push_failed"] else "")
+                elif waiting:
+                    line += f"; {waiting} subscription changes wait for a run with room for them"
+                lines.append(line)
             except playlists.ServiceError as e:
                 code = playlists.problem_code(c, e)
                 lines.append(f"{who}: {code}")

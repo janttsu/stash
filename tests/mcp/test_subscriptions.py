@@ -24,6 +24,7 @@ class SubFake(Fake):
         self.followed_artists = {"a" * 22}
         self.unfollowed_playlists: set[str] = set()
         self.scope_missing = False
+        self.lookups: list[dict] = []     # the channels.list queries made to resolve addresses
 
     def youtube_api(self, request, path, q, body):
         if path == "/subscriptions":
@@ -39,10 +40,14 @@ class SubFake(Fake):
             if request.method == "DELETE":
                 self.subs.pop(q["id"])
                 return httpx.Response(204)
-        if path == "/channels" and ("forHandle" in q or "id" in q):
+        if path == "/channels" and ("forHandle" in q or "forUsername" in q or "id" in q):
+            self.lookups.append({k: v for k, v in q.items() if k != "part"})
             if q.get("forHandle") == "@delta" or q.get("id") == NEW_CH:
                 return httpx.Response(200, json={"items": [{"id": NEW_CH, "snippet": {"title": "Delta New", "description": "d"},
                                                             "statistics": {"videoCount": "7"}}]})
+            if q.get("forUsername") == "legacyname":   # an old /user/ name that is not a handle
+                return httpx.Response(200, json={"items": [{"id": "UC" + "L" * 22, "snippet": {"title": "Legacy", "description": ""},
+                                                            "statistics": {"videoCount": "1"}}]})
             return httpx.Response(200, json={"items": []})
         if path == "/playlistItems" and q.get("playlistId", "").startswith("UU"):
             last = CH.get("UC" + q["playlistId"][2:], (None, None, None))[2]
@@ -200,6 +205,28 @@ def test_scheduled_activity_check(api, stash, fake):
     assert jobs._stale_activity(c)["checked"] == 1, "then the stale one"
     assert not [x for x in fake.calls if x.startswith("POST")], "the check sends nothing"
     con.close()
+
+
+def test_custom_addresses_and_the_daily_push(api, stash, fake):
+    """/c/<name> is tried as a handle first, then as a legacy username; the youtube-push task sends pending
+    subscription changes when its budget has room for them."""
+    from app import jobs
+
+    web = stash["web"]
+    connect(stash, "youtube")
+    web.post("/api/subscriptions/youtube/sync")
+    fake.lookups.clear()
+    r = web.post("/api/subscriptions/youtube/edit", json={"ops": [{"op": "subscribe", "items": [
+        "https://www.youtube.com/c/delta", "https://www.youtube.com/user/legacyname", "https://www.youtube.com/c/nobody"]}]}).json()
+    assert r["subscribed"] == 2 and r["not_found"] == ["https://www.youtube.com/c/nobody"], r
+    assert fake.lookups[:3] == [{"forHandle": "@delta"}, {"forHandle": "@legacyname"}, {"forUsername": "legacyname"}]
+    assert {x["title"]: x["state"] for x in web.get("/api/subscriptions/youtube?state=added").json()["items"]} == {"Delta New": "added", "Legacy": "added"}
+    fake.calls.clear()
+    r = jobs.youtube_push()
+    assert r["ok"] and "2 subscription changes sent" in r["summary"], r
+    assert fake.calls.count("POST www.googleapis.com/youtube/v3/subscriptions") == 2
+    assert web.get("/api/subscriptions/youtube?state=added").json()["items"] == []
+    assert web.get("/api/subscriptions").json()["stats"]["youtube"]["pending"] == 0
 
 
 def test_spotify_artists_and_followed_playlists(api, stash, fake):

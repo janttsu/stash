@@ -116,7 +116,10 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   fetch back when complete; a 4xx for one video drops it and reports it, a 5xx ends the batch with the video
   still pending: the first real run met a passing 503 from YouTube). `push_batch(c, budget)` is what the daily `youtube-push` job runs
   (`jobs.youtube_push`, `PUSH_BATCH`=160, `scripts/systemd/stash-youtube-push.*` at 10:30): dirty playlists
-  first, then the deletions of marked playlists once nothing is pending. A *quotaExceeded* 403 from YouTube is
+  first, then the deletions of marked playlists once nothing is pending, then (`jobs.youtube_push`) the pending
+  subscribes/unsubscribes when the rest of the budget covers them all. `/c/<name>` and `/user/<name>`
+  addresses are resolved as a handle first, then as a legacy username (`subscriptions._resolve`). A
+  *quotaExceeded* 403 from YouTube is
   turned into the rate-limit pause until the next reset (`youtube_quota_reset`, midnight Pacific time).
 - **Subscriptions** (`app/subscriptions.py`, `static/js/subscriptions.js`, 2026-10-27): uses Playlists'
   connections, HTTP client (`_api`, retries) and progress record (key `(uid, "<service>:subscriptions")`).
