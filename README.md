@@ -326,6 +326,13 @@ A Google app in *Testing* ends its connection after seven days; press **Connect 
 quota is 10 000 units a day and every added, removed or moved item costs about 50; fetching is cheap. Spotify
 playlists are pushed as a whole in one or two calls.
 
+Spotify (a developer app in *Development Mode*, as every personal app is) has worked this way since February
+2026: the app's owner needs Spotify Premium and at most five accounts can use the app; the songs of a playlist
+can be read only when you own it or collaborate on it. Playlists someone else owns that you follow are kept
+with their name, owner and size only (the fetch summary says how many); to edit one in Stash, copy it into a
+playlist of your own on Spotify first. Stash uses Spotify's current calls (`/playlists/{id}/items`,
+`/me/playlists`, `/me/library`).
+
 | Tool | What it does |
 | --- | --- |
 | `playlists_overview` | the connected services and every playlist (P1, P2, …) with its size and pending changes |
@@ -355,7 +362,9 @@ subscriptions; for Spotify the artists you follow and the playlists you follow (
   they are kept in Stash only (state *only in Stash*), with their title, owner and size; they are never sent
   to YouTube.
 
-Spotify needs the permissions `user-follow-read` and `user-follow-modify`; a connection made before Stash asked
+Following and unfollowing on Spotify go through its library call (`/me/library`), whose documentation lists
+playlists but not artists; if Spotify refuses an artist, the summary says so and the change stays pending.
+Spotify needs the permissions `user-follow-*` and `user-library-*`; a connection made before Stash asked
 for them is told to *Connect again* on the Playlists page.
 
 | Tool | What it does |

@@ -107,6 +107,8 @@ function resultBox() {
       h('div', { class: 'small' }, t('Pushing failed for {n} (their changes are still pending):', { n: pushFailed.length })),
       h('ul', { class: 'small' }, pushFailed.map((f) => h('li', null, `${f.name}: ${f.error}`))),
     ] : null,
+    r.metadata_only?.length ? h('div', { class: 'small' },
+      t('{n} playlists owned by someone else: Spotify gives apps only their name, owner and size, not the songs.', { n: r.metadata_only.length })) : null,
     r.skipped_with_local_changes.length ? h('div', { class: 'small' },
       t('Left alone because of pending changes: {names}', { names: r.skipped_with_local_changes.join(', ') })) : null,
     r.failed.length ? [
@@ -168,7 +170,8 @@ async function draw() {
     type: 'button', class: view.playlist === p.id ? 'pl__list active' : 'pl__list',
     onclick: () => { view.playlist = p.id; draw(); },
   }, h('span', { class: `pl__badge pl__badge--${p.service}` }, serviceName(p.service)), ' ',
-  h('b', null, p.name), h('span', { class: 'muted small' }, ` · ${t('{n} items', { n: p.count })}`),
+  h('b', null, p.name), h('span', { class: 'muted small' },
+    ` · ${t('{n} items', { n: p.service === 'spotify' && !p.editable && !p.count ? p.remote_count : p.count })}`),
   p.pending ? h('span', { class: 'pl__pending' }, ` ${t('{n} pending', { n: p.pending })}`) : null,
   p.editable ? null : h('span', { class: 'muted small' }, ` · ${t('someone else’s')}`),
   p.gone ? h('span', { class: 'muted small' }, ` · ${t('gone from the service')}`) : null);
@@ -238,7 +241,9 @@ function playlistDetail(d) {
         await api('DELETE', `/api/playlists/lists/${p.id}`);
         view.playlist = null;
       }) }, t('Forget copy'))),
-    d.items.length ? list : h('p', { class: 'empty' }, t('This playlist is empty.')));
+    d.items.length ? list : h('p', { class: 'empty' }, p.service === 'spotify' && !p.editable
+      ? t('Spotify does not let apps read the songs of playlists that someone else owns, so Stash keeps only its name, owner and size ({n} songs). Open it on Spotify to listen; to edit it here, copy it into a playlist of your own on Spotify first.', { n: p.remote_count })
+      : t('This playlist is empty.')));
 }
 
 async function addDialog(p, edit) {

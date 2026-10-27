@@ -38,9 +38,10 @@ PROVIDERS = {
         "auth": "https://accounts.spotify.com/authorize",
         "token": "https://accounts.spotify.com/api/token",
         "api": "https://api.spotify.com/v1",
-        # user-follow-*: followed artists on the Subscriptions page (app/subscriptions.py)
+        # user-follow-*, user-library-*: followed artists and playlists on the Subscriptions page
+        # (app/subscriptions.py); following goes through /me/library since February 2026
         "scope": "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private"
-                 " user-follow-read user-follow-modify",
+                 " user-follow-read user-follow-modify user-library-read user-library-modify",
     },
     "youtube": {
         "auth": "https://accounts.google.com/o/oauth2/v2/auth",
@@ -299,14 +300,20 @@ def _iso_duration_ms(value: str) -> int:
 
 
 def _spotify_tracks(http: httpx.Client, ids: list[str]) -> dict[str, dict]:
+    # one call per track: Spotify removed the several-tracks call (/tracks?ids=) for Development Mode apps in 2026
     out: dict[str, dict] = {}
-    for part in db.chunks(ids, 50):
-        data = _check("spotify", http.get(f"{PROVIDERS['spotify']['api']}/tracks", params={"ids": ",".join(part)}))
-        for t in data.get("tracks", []):
-            if t:
-                out[t["id"]] = {"title": t["name"], "artist": ", ".join(a["name"] for a in t.get("artists", [])),
-                                "duration_ms": t.get("duration_ms", 0)}
+    for tid in ids[:200]:
+        t = _check("spotify", http.get(f"{PROVIDERS['spotify']['api']}/tracks/{tid}"))
+        if t:
+            out[t["id"]] = {"title": t["name"], "artist": ", ".join(a["name"] for a in t.get("artists", [])),
+                            "duration_ms": t.get("duration_ms", 0)}
     return out
+
+
+def spotify_total(p: dict) -> int:
+    """A playlist's size. Spotify renamed the playlist's `tracks` to `items` in February 2026."""
+    box = p.get("items") if isinstance(p.get("items"), dict) else p.get("tracks")
+    return int((box or {}).get("total") or 0)
 
 
 def _metadata(http: httpx.Client, service: str, ids: list[str]) -> dict[str, dict]:
@@ -330,7 +337,7 @@ def _remote_playlists(http: httpx.Client, service: str, acc) -> list[dict]:
                 out.append({"external_id": p["id"], "name": p.get("name", ""), "description": p.get("description") or "",
                             "public": int(bool(p.get("public"))), "owner": owner,
                             "editable": int(owner == acc["external_id"] or bool(p.get("collaborative"))),
-                            "remote_count": p.get("tracks", {}).get("total", 0), "snapshot": p.get("snapshot_id", "")})
+                            "remote_count": spotify_total(p), "snapshot": p.get("snapshot_id", "")})
             url = data.get("next")
         return out
     token = None
@@ -358,15 +365,18 @@ def _remote_items(http: httpx.Client, service: str, external_id: str, on_page=No
     out: list[dict] = []
     read = 0
     if service == "spotify":
-        url, params = f"{api}/playlists/{external_id}/tracks", {"limit": 100, "fields": "next,total,items(added_at,track(id,name,duration_ms,artists(name),is_local))"}
+        # /items and `item` since February 2026 (formerly /tracks and `track`); readable only for playlists the
+        # user owns or collaborates on
+        url, params = f"{api}/playlists/{external_id}/items", {"limit": 100}
         while url and len(out) < MAX_ITEMS:
             data = _check(service, http.get(url, params=params))
             params = None
             for it in data.get("items", []):
                 read += 1
-                t = it.get("track") or {}
-                if not t.get("id"):
-                    continue   # local files and unavailable tracks cannot be written back
+                t = it.get("item") if isinstance(it.get("item"), dict) else it.get("track")
+                t = t if isinstance(t, dict) else {}
+                if not t.get("id") or t.get("type", "track") != "track":
+                    continue   # local files, unavailable tracks and podcast episodes cannot be written back
                 out.append({"item_id": t["id"], "remote_id": "", "title": t.get("name", ""),
                             "artist": ", ".join(a["name"] for a in t.get("artists", [])),
                             "duration_ms": t.get("duration_ms", 0), "added_at": _iso_time(it.get("added_at"))})
@@ -454,7 +464,7 @@ def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = 
 
 def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: bool) -> dict:
     con, t = c.con, db.now()
-    fetched, skipped, failed, item_count = 0, [], [], 0
+    fetched, skipped, failed, item_count, metadata_only = 0, [], [], 0, []
     with _api(c, service) as http:
         if playlist_id is not None:
             row = playlist(c, playlist_id)
@@ -462,11 +472,10 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
                        "public": row["public"], "owner": row["owner"], "editable": row["editable"],
                        "remote_count": row["remote_count"], "snapshot": row["snapshot"]}]
             if service == "spotify":   # the one playlist's own metadata
-                p = _check(service, http.get(f"{PROVIDERS[service]['api']}/playlists/{row['external_id']}",
-                                             params={"fields": "name,description,public,snapshot_id,tracks.total,owner.id,collaborative"}))
+                p = _check(service, http.get(f"{PROVIDERS[service]['api']}/playlists/{row['external_id']}"))
                 wanted[0] |= {"name": p.get("name", ""), "description": p.get("description") or "",
                               "public": int(bool(p.get("public"))), "snapshot": p.get("snapshot_id", ""),
-                              "remote_count": p.get("tracks", {}).get("total", 0)}
+                              "remote_count": spotify_total(p) or row["remote_count"]}
             else:
                 p = _check(service, http.get(f"{PROVIDERS[service]['api']}/playlists",
                                              params={"part": "snippet,status,contentDetails", "id": row["external_id"]}))
@@ -485,6 +494,22 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
                               (c.uid, service, p["external_id"])).fetchone()
             if row and row["dirty"] and not force:
                 skipped.append(row["name"])
+                continue
+            if service == "spotify" and not p["editable"]:
+                # Spotify gives Development Mode apps no contents of playlists that someone else owns (2026):
+                # keep the name, owner and size, and whatever items an earlier fetch stored
+                with db.tx(con):
+                    if row:
+                        con.execute("UPDATE playlists SET name=?, description=?, public=?, editable=0, owner=?, remote_count=?,"
+                                    " snapshot=?, synced_at=?, gone=0 WHERE id=?",
+                                    (p["name"], p["description"], p["public"], p["owner"], p["remote_count"], p["snapshot"],
+                                     t, row["id"]))
+                    else:
+                        con.execute("INSERT INTO playlists(user_id, service, external_id, name, description, public, editable,"
+                                    " owner, remote_count, snapshot, synced_at) VALUES(?,?,?,?,?,?,0,?,?,?,?)",
+                                    (c.uid, service, p["external_id"], p["name"], p["description"], p["public"], p["owner"],
+                                     p["remote_count"], p["snapshot"], t))
+                metadata_only.append(p["name"])
                 continue
 
             def on_page(read, total, before=item_count, fallback=int(p.get("remote_count") or 0)):
@@ -524,7 +549,7 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
                     con.execute("UPDATE playlists SET gone=? WHERE id=?", (int(r["external_id"] not in seen), r["id"]))
                 con.execute("UPDATE playlist_accounts SET synced_at=? WHERE id=?", (t, acc["id"]))
     return {"service": service, "total": len(wanted), "fetched": fetched, "items": item_count,
-            "skipped_with_local_changes": skipped, "failed": failed}
+            "skipped_with_local_changes": skipped, "failed": failed, "metadata_only": metadata_only}
 
 
 # --- reading ---------------------------------------------------------------------------------------------
@@ -720,10 +745,10 @@ def push(c: Ctx, playlist_id: int, *, track: bool = True) -> dict:
     with _api(c, service) as http:
         if service == "spotify":
             uris = [f"spotify:track:{r['item_id']}" for r in desired]
-            _check(service, http.put(f"{api}/playlists/{row['external_id']}/tracks", json={"uris": uris[:100]}))
+            _check(service, http.put(f"{api}/playlists/{row['external_id']}/items", json={"uris": uris[:100]}))
             changes["calls"] += 1
             for part in db.chunks(uris[100:], 100):
-                _check(service, http.post(f"{api}/playlists/{row['external_id']}/tracks", json={"uris": part}))
+                _check(service, http.post(f"{api}/playlists/{row['external_id']}/items", json={"uris": part}))
                 changes["calls"] += 1
             if row["dirty"] == 2:
                 _check(service, http.put(f"{api}/playlists/{row['external_id']}",
@@ -781,7 +806,8 @@ def create(c: Ctx, service: str, name: str, description: str = "", public: bool 
     api = PROVIDERS[service]["api"]
     with _api(c, service) as http:
         if service == "spotify":
-            made = _check(service, http.post(f"{api}/users/{acc['external_id']}/playlists",
+            # POST /me/playlists: /users/{id}/playlists was removed for Development Mode apps in February 2026
+            made = _check(service, http.post(f"{api}/me/playlists",
                                              json={"name": name, "description": description[:300], "public": bool(public)}))
             external_id = made["id"]
         else:

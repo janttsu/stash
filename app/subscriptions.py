@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from . import db
 from .main import Ctx, clean_text, ctx, err, norm_tags
 from .playlists import (PROVIDERS, ServiceError, _api, _check, _iso_time, _progress, _progress_lock, _service,
-                        _service_errors, _set_progress, account, problem_code)
+                        _service_errors, _set_progress, account, problem_code, spotify_total)
 
 KINDS = {"youtube": ("channel", "playlist"), "spotify": ("artist", "playlist")}
 MAX_SUBSCRIPTIONS = 5000
@@ -108,7 +108,7 @@ def _remote_spotify(http, acc, on_page) -> list[dict]:
                 out.append({"kind": "playlist", "external_id": p["id"], "remote_id": "", "title": p.get("name", ""),
                             "description": (p.get("description") or "")[:1000],
                             "owner": p.get("owner", {}).get("display_name") or p.get("owner", {}).get("id", ""),
-                            "item_count": p.get("tracks", {}).get("total"), "subscribed_at": None})
+                            "item_count": spotify_total(p), "subscribed_at": None})
         on_page(len(out), None)
         url = data.get("next")
     return out
@@ -301,10 +301,10 @@ def _resolve(http, service: str, kind: str, ref: str) -> Optional[dict]:
         a = _check(service, http.get(f"{api}/artists/{ref}"))
         return {"external_id": a["id"], "title": a.get("name", ""), "description": ", ".join(a.get("genres", [])[:5]),
                 "owner": "", "item_count": a.get("followers", {}).get("total")}
-    p = _check(service, http.get(f"{api}/playlists/{ref}", params={"fields": "id,name,description,owner,tracks.total"}))
+    p = _check(service, http.get(f"{api}/playlists/{ref}"))
     return {"external_id": p["id"], "title": p.get("name", ""), "description": (p.get("description") or "")[:1000],
             "owner": p.get("owner", {}).get("display_name") or p.get("owner", {}).get("id", ""),
-            "item_count": p.get("tracks", {}).get("total")}
+            "item_count": spotify_total(p)}
 
 
 def _own(c: Ctx, ids) -> list:
@@ -446,12 +446,11 @@ def _write(http, service: str, api: str, r) -> None:
         elif r["remote_id"]:
             _check(service, http.delete(f"{api}/subscriptions", params={"id": r["remote_id"]}))
         return
-    if r["kind"] == "artist":
-        method = http.put if r["state"] == "added" else http.delete
-        _check(service, method(f"{api}/me/following", params={"type": "artist", "ids": r["external_id"]}))
-    else:
-        method = http.put if r["state"] == "added" else http.delete
-        _check(service, method(f"{api}/playlists/{r['external_id']}/followers"))
+    # Spotify, since February 2026: follow and unfollow through the generic library call with a URI. Its
+    # documentation lists playlists but not artists; if Spotify refuses an artist, the summary says so and the
+    # change stays pending.
+    method = http.put if r["state"] == "added" else http.delete
+    _check(service, method(f"{api}/me/library", params={"uris": f"spotify:{r['kind']}:{r['external_id']}"}))
 
 
 # --- reading for the page and MCP -------------------------------------------------------------------------------

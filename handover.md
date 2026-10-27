@@ -77,8 +77,14 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   fetch reports progress through `GET /api/playlists/accounts/<service>/progress` (in-memory, one process)
   and returns a summary (`total`, `fetched`, `items`, `skipped_with_local_changes`, `failed`). `sync_all()`
   (`POST …/sync-all`, the page's *Synchronise*, MCP `playlists_sync(push_pending=true)`) pushes every dirty
-  playlist first (progress phase `push`) and adds `pushed` and `push_failed`. Still to check: Spotify for real, Spotify's
-  `/tracks` on more than 100 items, YouTube quota use on a push, and the 7-day end of a *Testing* connection.
+  playlist first (progress phase `push`) and adds `pushed` and `push_failed`. **Spotify's February 2026
+  Development Mode changes** (developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)
+  broke the first real Spotify fetch (every `/playlists/{id}/tracks` → 403): now `/items` with `item`,
+  `spotify_total()` for the renamed size field, per-track `/tracks/{id}` (no `/tracks?ids=`), `POST
+  /me/playlists`, follow/unfollow via `PUT/DELETE /me/library?uris=`. Others' playlists give no contents:
+  stored metadata-only (`metadata_only` in the fetch summary). The test fake answers 403 on the removed
+  paths. Still to check: a real Spotify push and create, artist follow via /me/library (undocumented),
+  YouTube quota use on a push, and the 7-day end of a *Testing* connection.
   Tokens are refreshed when expired; a failed refresh asks the user to connect again. Items with no id
   (Spotify local files) are skipped.
 - **Subscriptions** (`app/subscriptions.py`, `static/js/subscriptions.js`, 2026-10-27): uses Playlists'

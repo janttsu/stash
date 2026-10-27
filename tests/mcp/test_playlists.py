@@ -39,34 +39,44 @@ class Fake:
             return self.spotify_api(request, u.path.removeprefix("/v1"), q, body)
         return self.youtube_api(request, u.path.removeprefix("/youtube/v3"), q, body)
 
-    # --- Spotify --------------------------------------------------------------------------------
+    # --- Spotify, as Development Mode apps see it since February 2026 -----------------------------
+    # /playlists/{id}/items (not /tracks), `items`/`item` (not `tracks`/`track`), no /tracks?ids=, POST
+    # /me/playlists (not /users/{id}/playlists), and no contents for playlists someone else owns.
+    REMOVED = ("/tracks", "/users/")
+
     def spotify_api(self, request, path, q, body):
-        tr = lambda i: {"id": i, "name": f"Track {i[-2:]}", "duration_ms": 180000, "artists": [{"name": "Artist"}]}  # noqa: E731
+        tr = lambda i: {"id": i, "type": "track", "name": f"Track {i[-2:]}", "duration_ms": 180000, "artists": [{"name": "Artist"}]}  # noqa: E731
+        forbidden = httpx.Response(403, json={"error": {"status": 403, "message": "Forbidden"}})
+        if path == "/tracks" or path.startswith("/users/") or path.endswith("/tracks"):
+            return forbidden
         if path == "/me":
             return httpx.Response(200, json={"id": "me", "display_name": "Me"})
         if path == "/me/playlists":
+            if request.method == "POST":
+                self.spotify["pl3"] = {"name": body["name"], "description": body["description"], "public": body["public"], "owner": "me", "tracks": []}
+                return httpx.Response(201, json={"id": "pl3"})
             return httpx.Response(200, json={"next": None, "items": [
                 {"id": k, "name": p["name"], "description": p["description"], "public": p["public"], "collaborative": False,
-                 "owner": {"id": p["owner"]}, "tracks": {"total": len(p["tracks"])}, "snapshot_id": f"snap-{len(p['tracks'])}"}
+                 "owner": {"id": p["owner"]}, "items": {"href": "…", "total": len(p["tracks"])}, "snapshot_id": f"snap-{len(p['tracks'])}"}
                 for k, p in self.spotify.items()]})
-        if path == "/tracks":
-            return httpx.Response(200, json={"tracks": [tr(i) for i in q["ids"].split(",")]})
-        if path == "/users/me/playlists" and request.method == "POST":
-            self.spotify["pl3"] = {"name": body["name"], "description": body["description"], "public": body["public"], "owner": "me", "tracks": []}
-            return httpx.Response(201, json={"id": "pl3"})
+        if path.startswith("/tracks/"):
+            return httpx.Response(200, json=tr(path.split("/")[2]))
         pid = path.split("/")[2]
         p = self.spotify[pid]
-        if path.endswith("/tracks"):
+        if path.endswith("/items"):
+            if p["owner"] != "me":
+                return forbidden
             if request.method == "GET":
-                return httpx.Response(200, json={"next": None, "items": [{"added_at": "2026-01-02T03:04:05Z", "track": tr(i)} for i in p["tracks"]]})
+                return httpx.Response(200, json={"next": None, "total": len(p["tracks"]), "items": [
+                    {"added_at": "2026-01-02T03:04:05Z", "item": tr(i)} for i in p["tracks"]]})
             ids = [x.split(":")[-1] for x in body["uris"]]
             p["tracks"] = ids if request.method == "PUT" else p["tracks"] + ids
             return httpx.Response(200, json={"snapshot_id": "snap-new"})
         if request.method == "PUT":
             p.update({"name": body["name"], "description": body["description"], "public": body["public"]})
             return httpx.Response(200)
-        return httpx.Response(200, json={"name": p["name"], "description": p["description"], "public": p["public"],
-                                         "snapshot_id": "snap", "tracks": {"total": len(p["tracks"])}, "owner": {"id": p["owner"]}})
+        return httpx.Response(200, json={"id": pid, "name": p["name"], "description": p["description"], "public": p["public"],
+                                         "snapshot_id": "snap", "items": {"total": len(p["tracks"])}, "owner": {"id": p["owner"]}})
 
     # --- YouTube --------------------------------------------------------------------------------
     def youtube_api(self, request, path, q, body):
@@ -156,13 +166,16 @@ def test_connect_and_fetch(api, stash, fake):
     assert {a["service"]: a["display_name"] for a in data["accounts"]} == {"spotify": "Me", "youtube": "My channel"}
     assert all(a["connected"] for a in data["accounts"])
     r = web.post("/api/playlists/accounts/spotify/sync").json()
-    assert r["fetched"] == 2
+    # someone else's playlist: Spotify (2026) gives no contents, so only its name, owner and size are kept
+    assert r["fetched"] == 1 and r["metadata_only"] == ["Not mine"] and r["failed"] == []
     r = web.post("/api/playlists/accounts/youtube/sync").json()
     assert r["fetched"] == 1
     data = web.get("/api/playlists").json()
     names = {(p["service"], p["name"]): p for p in data["playlists"]}
     assert names[("spotify", "Chill")]["count"] == 3 and names[("spotify", "Chill")]["editable"]
-    assert not names[("spotify", "Not mine")]["editable"]
+    assert not names[("spotify", "Not mine")]["editable"] and names[("spotify", "Not mine")]["remote_count"] == 1
+    assert names[("spotify", "Not mine")]["count"] == 0
+    assert not [c for c in fake.calls if c.endswith("/tracks")], "never the removed /tracks paths"
     yt = names[("youtube", "Live")]
     assert yt["count"] == 3 and yt["url"] == "https://www.youtube.com/playlist?list=PL1"
     d = web.get(f"/api/playlists/lists/{yt['id']}").json()
@@ -172,7 +185,7 @@ def test_connect_and_fetch(api, stash, fake):
     con = db.connect()
     con.execute("UPDATE playlist_accounts SET expires_at=0 WHERE service='spotify'")
     con.close()
-    assert web.post("/api/playlists/accounts/spotify/sync").json()["fetched"] == 2
+    assert web.post("/api/playlists/accounts/spotify/sync").json()["fetched"] == 1
     assert "POST accounts.spotify.com/api/token" in fake.calls[-10:]
     # a playlist that disappears from the service stays in Stash, marked gone; the export holds everything
     del fake.spotify["pl2"]
@@ -255,9 +268,9 @@ def test_mcp_tools(api, stash, fake):
     err, text = mcp.call("playlists_overview")
     assert not err and "spotify: connected as Me" in text and "youtube: not connected" in text and "No playlists fetched yet" in text
     err, text = mcp.call("playlists_sync", service="spotify")
-    assert not err and text == "Fetched 2 of 2 playlists (4 items) from spotify."
+    assert not err and text.startswith("Fetched 1 of 2 playlists (3 items) from spotify; 1 owned by someone else")
     err, text = mcp.call("playlists_overview")
-    assert "[spotify] Chill — 3 items" in text and "Not mine — 1 items, someone else's" in text
+    assert "[spotify] Chill — 3 items" in text and "Not mine — 1 items, someone else's, contents not readable on Spotify" in text
     pid = int(next(line for line in text.splitlines() if "Chill" in line).split()[0][1:])
     err, text = mcp.call("playlist_show", playlist_id=pid)
     assert not err and text.startswith(f"P{pid} Chill [spotify] 3 items") and "1. Track 01 — Artist (3:00)" in text
@@ -302,7 +315,8 @@ def test_youtube_api_disabled_is_explained(api, stash, fake):
     assert err and "youtube.googleapis.com?project=123456789012" in text
     fake.api_disabled = False   # the user enabled it: fetching works without connecting again
     r = web.post("/api/playlists/accounts/youtube/sync").json()
-    assert r == {"service": "youtube", "total": 1, "fetched": 1, "items": 3, "skipped_with_local_changes": [], "failed": []}
+    assert r == {"service": "youtube", "total": 1, "fetched": 1, "items": 3, "skipped_with_local_changes": [], "failed": [],
+                 "metadata_only": []}
 
 
 def test_fetch_summary_and_progress(api, stash, fake):
@@ -357,7 +371,7 @@ def test_synchronise_both_ways(api, stash, fake):
     r = web.post("/api/playlists/accounts/spotify/sync").json()
     assert r["skipped_with_local_changes"] == ["Chill"] and fake.spotify["pl1"]["tracks"][0] == "t" * 20 + "01"
     r = web.post("/api/playlists/accounts/spotify/sync-all").json()
-    assert r["pushed"] == ["Chill"] and r["push_failed"] == [] and r["fetched"] == 2 and r["skipped_with_local_changes"] == []
+    assert r["pushed"] == ["Chill"] and r["push_failed"] == [] and r["fetched"] == 1 and r["skipped_with_local_changes"] == []
     assert fake.spotify["pl1"]["tracks"] == ["t" * 20 + "02", "t" * 20 + "03"], "the change reached the service"
     names = {p["name"]: p for p in web.get("/api/playlists").json()["playlists"]}
     assert not names["Chill"]["pending"] and names["Chill"]["count"] == 2
@@ -365,11 +379,11 @@ def test_synchronise_both_ways(api, stash, fake):
     assert web.get("/api/playlists/accounts/spotify/progress").json() == {"running": False}
     # nothing pending: a synchronise is just a fetch
     r = web.post("/api/playlists/accounts/spotify/sync-all").json()
-    assert r["pushed"] == [] and r["fetched"] == 2
+    assert r["pushed"] == [] and r["fetched"] == 1
     # over MCP, push_pending=true does the same
     web.post(f"/api/playlists/lists/{pid}/edit", json={"ops": [{"op": "add", "items": ["n" * 22]}]})
     err, text = Client(stash["raw"], new_key(stash)["key"]).call("playlists_sync", service="spotify", push_pending=True)
-    assert not err and text.startswith("Pushed 1 playlists with pending changes (Chill). Fetched 2 of 2")
+    assert not err and text.startswith("Pushed 1 playlists with pending changes (Chill). Fetched 1 of 2")
     assert fake.spotify["pl1"]["tracks"][-1] == "n" * 22
     reader = Client(stash["raw"], new_key(stash, can_write=False)["key"])
     err, text = reader.call("playlists_sync", service="spotify", push_pending=True)

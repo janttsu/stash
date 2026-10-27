@@ -455,9 +455,11 @@ class Session:
         if not data["playlists"]:
             lines.append("No playlists fetched yet (playlists_sync).")
         for p in data["playlists"]:
+            hidden = p["service"] == "spotify" and not p["editable"] and not p["count"]
             flags = (f", {p['pending']} pending changes" if p["pending"] else "") + ("" if p["editable"] else ", someone else's") \
-                + (", gone from the service" if p["gone"] else "")
-            lines.append(f"P{p['id']} [{p['service']}] {p['name']} — {p['count']} items{flags}")
+                + (", contents not readable on Spotify" if hidden else "") + (", gone from the service" if p["gone"] else "")
+            size = p["remote_count"] if hidden else p["count"]
+            lines.append(f"P{p['id']} [{p['service']}] {p['name']} — {size} items{flags}")
         return "\n".join(lines)
 
     def playlist_show(self, playlist_id: int, offset: int = 0, limit: int = 200) -> str:
@@ -504,7 +506,10 @@ class Session:
         skipped = f"; left alone because of pending changes: {', '.join(r['skipped_with_local_changes'])}" \
             if r["skipped_with_local_changes"] else ""
         failed = "; failed: " + "; ".join(f"{f['name']} ({f['error']})" for f in r["failed"]) if r["failed"] else ""
-        return f"{pushed}Fetched {r['fetched']} of {r['total']} playlists ({r['items']} items) from {r['service']}{skipped}{failed}."
+        meta = r.get("metadata_only") or []
+        others = (f"; {len(meta)} owned by someone else: name, owner and size only (Spotify gives apps no contents of "
+                  "other people's playlists)") if meta else ""
+        return f"{pushed}Fetched {r['fetched']} of {r['total']} playlists ({r['items']} items) from {r['service']}{others}{skipped}{failed}."
 
     def playlist_create(self, service: str, name: str, description: str = "", public: bool = False) -> str:
         r = self.api.playlist_create(service, name, description, public)

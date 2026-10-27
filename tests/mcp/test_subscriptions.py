@@ -54,29 +54,29 @@ class SubFake(Fake):
         return super().youtube_api(request, path, q, body)
 
     def spotify_api(self, request, path, q, body):
-        if path == "/me/following":
+        forbidden = httpx.Response(403, json={"error": {"status": 403, "message": "Forbidden"}})
+        if path == "/me/following":   # since February 2026 only GET is left; following goes through /me/library
             if self.scope_missing:
                 return httpx.Response(403, json={"error": {"status": 403, "message": "Insufficient client scope"}})
-            if request.method == "GET":
-                items = [{"id": a, "name": self.artists[a], "genres": ["rock"], "followers": {"total": 1000}} for a in sorted(self.followed_artists)]
-                return httpx.Response(200, json={"artists": {"items": items, "total": len(items), "next": None}})
-            ids = set(q["ids"].split(","))
-            self.followed_artists = self.followed_artists | ids if request.method == "PUT" else self.followed_artists - ids
-            return httpx.Response(204)
+            if request.method != "GET":
+                return forbidden
+            items = [{"id": a, "name": self.artists[a], "genres": ["rock"]} for a in sorted(self.followed_artists)]
+            return httpx.Response(200, json={"artists": {"items": items, "total": len(items), "next": None}})
+        if path == "/me/library":
+            for uri in q["uris"].split(","):
+                _, kind, sid = uri.split(":")
+                if kind == "artist":
+                    self.followed_artists = self.followed_artists | {sid} if request.method == "PUT" else self.followed_artists - {sid}
+                elif request.method == "DELETE":
+                    self.unfollowed_playlists.add(sid)
+                    self.spotify.pop(sid, None)
+            return httpx.Response(200)
+        if path.endswith("/followers"):
+            return forbidden
         if path.startswith("/artists/"):
             a = path.split("/")[2]
-            return httpx.Response(200, json={"id": a, "name": self.artists[a], "genres": [], "followers": {"total": 5}})
-        if path.endswith("/followers"):
-            pid = path.split("/")[2]
-            if request.method == "DELETE":
-                self.unfollowed_playlists.add(pid)
-                self.spotify.pop(pid, None)
-            return httpx.Response(200)
-        r = super().spotify_api(request, path, q, body)
-        if path.startswith("/playlists/") and request.method == "GET" and not path.endswith("/tracks"):
-            data = r.json() | {"id": path.split("/")[2]}
-            return httpx.Response(200, json=data)
-        return r
+            return httpx.Response(200, json={"id": a, "name": self.artists[a], "genres": []})
+        return super().spotify_api(request, path, q, body)
 
 
 @pytest.fixture

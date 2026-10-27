@@ -212,6 +212,8 @@ export const FI = {
   'Fetching from {service} failed': 'Haku palvelusta {service} epäonnistui',
   '{fetched} of {total} playlists fetched from {service} ({items} items)': '{fetched} / {total} soittolistaa haettu palvelusta {service} ({items} kappaletta)',
   'Left alone because of pending changes: {names}': 'Jätetty rauhaan odottavien muutosten takia: {names}',
+  '{n} playlists owned by someone else: Spotify gives apps only their name, owner and size, not the songs.': '{n} soittolistaa on jonkun muun: Spotify antaa sovelluksille niistä vain nimen, tekijän ja koon, ei kappaleita.',
+  'Spotify does not let apps read the songs of playlists that someone else owns, so Stash keeps only its name, owner and size ({n} songs). Open it on Spotify to listen; to edit it here, copy it into a playlist of your own on Spotify first.': 'Spotify ei anna sovellusten lukea muiden tekemien soittolistojen kappaleita, joten Stash säilyttää vain nimen, tekijän ja koon ({n} kappaletta). Kuuntele sitä Spotifyssa; jos haluat muokata sitä täällä, kopioi se ensin Spotifyssa omaksi soittolistaksesi.',
   '{n} failed:': '{n} epäonnistui:',
   'YouTube is connected, but the YouTube Data API is not enabled': 'YouTube on yhdistetty, mutta YouTube Data API ei ole käytössä',
   'Google allows the connection but refuses to give playlists until the YouTube Data API v3 is enabled in the same Google Cloud project as your client{project}.': 'Google sallii yhteyden mutta ei anna soittolistoja ennen kuin YouTube Data API v3 on otettu käyttöön samassa Google Cloud -projektissa kuin tunnuksesi{project}.',

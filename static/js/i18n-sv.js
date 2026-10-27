@@ -201,6 +201,8 @@ export const SV = {
   "Fetching from {service} failed": "Hämtningen från {service} misslyckades",
   "{fetched} of {total} playlists fetched from {service} ({items} items)": "{fetched} av {total} spellistor hämtade från {service} ({items} spår)",
   "Left alone because of pending changes: {names}": "Lämnade ifred på grund av väntande ändringar: {names}",
+  "{n} playlists owned by someone else: Spotify gives apps only their name, owner and size, not the songs.": "{n} spellistor ägs av någon annan: Spotify ger appar bara deras namn, ägare och storlek, inte låtarna.",
+  "Spotify does not let apps read the songs of playlists that someone else owns, so Stash keeps only its name, owner and size ({n} songs). Open it on Spotify to listen; to edit it here, copy it into a playlist of your own on Spotify first.": "Spotify låter inte appar läsa låtarna i spellistor som någon annan äger, så Stash behåller bara namn, ägare och storlek ({n} låtar). Öppna den på Spotify för att lyssna; för att redigera den här, kopiera den först till en egen spellista på Spotify.",
   "{n} failed:": "{n} misslyckades:",
   "YouTube is connected, but the YouTube Data API is not enabled": "YouTube är anslutet, men YouTube Data API är inte aktiverat",
   "Google allows the connection but refuses to give playlists until the YouTube Data API v3 is enabled in the same Google Cloud project as your client{project}.": "Google tillåter anslutningen men lämnar inte ut spellistor förrän YouTube Data API v3 är aktiverat i samma Google Cloud-projekt som din klient{project}.",
