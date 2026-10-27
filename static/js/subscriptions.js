@@ -87,7 +87,8 @@ function progressBox() {
       h('b', null, label.replace('{service}', SERVICES[p.service])),
       h('span', { class: 'muted small grow' }, p.total ? t('{done} of {total}', { done: p.done, total: p.total }) : '')),
     h('progress', { max: p.total || 1, value: p.total ? p.done : undefined }),
-    p.name ? h('div', { class: 'muted small' }, p.name) : null);
+    p.name ? h('div', { class: 'muted small' }, p.name) : null,
+    p.waiting ? h('div', { class: 'small pl__waiting' }, t('{service} asked for a pause (too many requests): continuing in {n} s…', { service: SERVICES[p.service], n: p.waiting })) : null);
 }
 
 function redrawProgress() {

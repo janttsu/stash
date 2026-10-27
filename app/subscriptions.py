@@ -135,7 +135,7 @@ def _pull(c: Ctx, service: str, acc, key) -> dict:
     def on_page(read, total):
         _set_progress(key, done=read, total=max(int(total or 0), read))
 
-    with _api(c, service) as http:
+    with _api(c, service, key) as http:
         remote = _remote_youtube(http, on_page) if service == "youtube" else _remote_spotify(http, acc, on_page)
     seen, added, updated = set(), 0, 0
     with db.tx(con):
@@ -190,7 +190,7 @@ def check_activity(c: Ctx, service: str, ids: list[int] | None = None) -> dict:
     checked, failed, t = 0, [], db.now()
     api = PROVIDERS["youtube"]["api"]
     try:
-        with _api(c, service) as http:
+        with _api(c, service, key) as http:
             for n, r in enumerate(rows):
                 _set_progress(key, done=n, name=r["title"])
                 uploads = "UU" + r["external_id"][2:] if r["external_id"].startswith("UC") else ""
@@ -414,7 +414,7 @@ def sync(c: Ctx, service: str, push: bool = False) -> dict:
                                  " ORDER BY title COLLATE NOCASE", (c.uid, service)).fetchall()
             _set_progress(key, total=len(rows))
             api = PROVIDERS[service]["api"]
-            with _api(c, service) as http:
+            with _api(c, service, key) as http:
                 for n, r in enumerate(rows):
                     _set_progress(key, done=n, name=r["title"])
                     try:

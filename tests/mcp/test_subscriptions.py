@@ -89,6 +89,7 @@ def fake(monkeypatch):
     con.close()
     f = SubFake()
     monkeypatch.setattr(playlists, "TRANSPORT", httpx.MockTransport(f))
+    monkeypatch.setattr(playlists, "MIN_INTERVAL", {})
     monkeypatch.setattr(playlists, "RETRY_PAUSE", 0)
     yield f
 

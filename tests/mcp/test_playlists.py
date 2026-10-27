@@ -24,6 +24,9 @@ class Fake:
         self.api_disabled = False      # Google's answer while the YouTube Data API is off in the client's project
         self.broken = set()            # playlist ids whose items the service refuses
         self.timeouts: dict[str, int] = {}   # path -> how many more GETs of it time out
+        self.rate_limited: dict[str, list] = {}   # path -> [how many more 429s, Retry-After]
+        self.renamed: dict[str, str] = {}   # YouTube video id -> its new title (the playlist item still shows the old)
+        self.deleted: set[str] = set()      # YouTube video ids deleted or made private
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         u = urlsplit(str(request.url))
@@ -46,6 +49,10 @@ class Fake:
 
     def spotify_api(self, request, path, q, body):
         tr = lambda i: {"id": i, "type": "track", "name": f"Track {i[-2:]}", "duration_ms": 180000, "artists": [{"name": "Artist"}]}  # noqa: E731
+        limit = self.rate_limited.get(path)
+        if limit and limit[0] > 0:
+            limit[0] -= 1
+            return httpx.Response(429, headers={"Retry-After": str(limit[1])}, json={"error": {"status": 429, "message": "API rate limit exceeded"}})
         forbidden = httpx.Response(403, json={"error": {"status": 403, "message": "Forbidden"}})
         if path == "/tracks" or path.startswith("/users/") or path.endswith("/tracks"):
             return forbidden
@@ -90,9 +97,10 @@ class Fake:
             return httpx.Response(404, json={"error": {"message": "playlistNotFound"}})
         if path == "/channels":
             return httpx.Response(200, json={"items": [{"id": "UC1", "snippet": {"title": "My channel"}}]})
-        if path == "/videos":
-            return httpx.Response(200, json={"items": [{"id": v, "snippet": {"title": f"Video {v[-2:]}", "channelTitle": "Chan"},
-                                                         "contentDetails": {"duration": "PT3M"}} for v in q["id"].split(",")]})
+        if path == "/videos":   # renamed videos answer with their new title; deleted ones are left out, as on YouTube
+            return httpx.Response(200, json={"items": [
+                {"id": v, "snippet": {"title": self.renamed.get(v, f"Video {v[-2:]}"), "channelTitle": "Chan"},
+                 "contentDetails": {"duration": "PT3M"}} for v in q["id"].split(",") if v not in self.deleted]})
         if path == "/playlists":
             if request.method == "POST":
                 self.youtube["PL2"] = {"title": body["snippet"]["title"], "description": body["snippet"]["description"],
@@ -111,7 +119,8 @@ class Fake:
             if request.method == "GET":
                 p = self.youtube[q["playlistId"]]
                 return httpx.Response(200, json={"items": [
-                    {"id": rid, "snippet": {"title": f"Video {vid[-2:]}", "videoOwnerChannelTitle": "Chan", "publishedAt": "2026-01-01T00:00:00Z",
+                    {"id": rid, "snippet": {"title": "Deleted video" if vid in self.deleted else f"Video {vid[-2:]}",
+                                            "videoOwnerChannelTitle": "Chan", "publishedAt": "2026-01-01T00:00:00Z",
                                             "resourceId": {"videoId": vid}, "position": i}} for i, (rid, vid) in enumerate(p["items"])]})
             if request.method == "DELETE":
                 for p in self.youtube.values():
@@ -142,6 +151,7 @@ def fake(monkeypatch):
     con.close()
     f = Fake()
     monkeypatch.setattr(playlists, "TRANSPORT", httpx.MockTransport(f))
+    monkeypatch.setattr(playlists, "MIN_INTERVAL", {})   # no pacing against the fake
     yield f
 
 
@@ -409,3 +419,35 @@ def test_timeouts_are_retried_then_reported(api, stash, fake, monkeypatch):
     fake.timeouts["/playlists"] = 3   # the list of playlists itself: a clear error, not a 500
     r = web.post("/api/playlists/accounts/youtube/sync")
     assert r.status_code == 502 and r.json()["detail"] == "youtube_error: 504 the service timed out (ReadTimeout)"
+
+
+def test_rate_limit_is_waited_out(api, stash, fake, monkeypatch):
+    """Spotify answers 429 with Retry-After after many calls: Stash waits that long and goes on; a very long
+    wait ends the call with a clear message instead of a silent hang."""
+    slept = []
+    monkeypatch.setattr(playlists.time, "sleep", lambda s: slept.append(s))
+    web = stash["web"]
+    connect(stash, "spotify")
+    fake.rate_limited["/me/playlists"] = [2, 3]
+    r = web.post("/api/playlists/accounts/spotify/sync")
+    assert r.status_code == 200 and r.json()["fetched"] == 1 and slept.count(3) == 2, "two waits of 3 s, then it went on"
+    fake.rate_limited["/me/playlists"] = [1, 3600]
+    r = web.post("/api/playlists/accounts/spotify/sync")
+    assert r.status_code == 502 and "rate_limited: spotify asks to wait about 60 min" in r.json()["detail"]
+
+
+def test_youtube_titles_follow_the_videos(api, stash, fake):
+    """A video's own title is used on every fetch, so a renamed video is renamed in Stash; a deleted or
+    private video keeps the last real title Stash saw, marked unavailable, instead of "Deleted video"."""
+    web = stash["web"]
+    connect(stash, "youtube")
+    web.post("/api/playlists/accounts/youtube/sync")
+    pid = web.get("/api/playlists").json()["playlists"][0]["id"]
+    fake.renamed["vidvidvid01"] = "Video 01 (official, remastered)"
+    fake.deleted.add("vidvidvid02")
+    web.post("/api/playlists/accounts/youtube/sync")
+    items = web.get(f"/api/playlists/lists/{pid}").json()["items"]
+    assert [(x["title"], x["unavailable"]) for x in items] == [
+        ("Video 01 (official, remastered)", False), ("Video 02", True), ("Video 03", False)]
+    web.post("/api/playlists/accounts/youtube/sync")   # and again: the saved title stays
+    assert web.get(f"/api/playlists/lists/{pid}").json()["items"][1]["title"] == "Video 02"

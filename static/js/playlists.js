@@ -77,7 +77,8 @@ function progressBox() {
       h('span', { class: 'small grow' }, p.name),
       !pushing && p.list_total ? h('span', { class: 'muted small' },
         t('{read} of {total} videos from this list', { read: p.list_read || 0, total: p.list_total })) : null) : null,
-    p.name && !pushing && p.list_total ? h('progress', { class: 'pl__progress-sub', max: p.list_total, value: p.list_read || 0 }) : null);
+    p.name && !pushing && p.list_total ? h('progress', { class: 'pl__progress-sub', max: p.list_total, value: p.list_read || 0 }) : null,
+    p.waiting ? h('div', { class: 'small pl__waiting' }, t('{service} asked for a pause (too many requests): continuing in {n} s…', { service: serviceName(p.service), n: p.waiting })) : null);
 }
 
 function drawProgress() {
@@ -142,8 +143,12 @@ const act = (fn) => attempt(async () => { await fn(); await draw(); });
 
 async function draw() {
   const data = await api('GET', '/api/playlists');
-  if (view.playlist && !data.playlists.some((p) => p.id === view.playlist)) view.playlist = null;
+  // one tab per service; the first time, the first connected one
+  if (!view.service) view.service = (data.accounts.find((a) => a.connected) || data.accounts[0] || {}).service || 'youtube';
+  const shown = data.playlists.filter((p) => p.service === view.service);
+  if (view.playlist && !shown.some((p) => p.id === view.playlist)) view.playlist = null;
   const detail = view.playlist ? await api('GET', `/api/playlists/lists/${view.playlist}?limit=5000`) : null;
+  const account = data.accounts.find((a) => a.service === view.service);
 
   const accountCard = (a) => h('div', { class: 'pl__account' },
     h('div', { class: 'row' },
@@ -169,8 +174,7 @@ async function draw() {
   const listRow = (p) => h('button', {
     type: 'button', class: view.playlist === p.id ? 'pl__list active' : 'pl__list',
     onclick: () => { view.playlist = p.id; draw(); },
-  }, h('span', { class: `pl__badge pl__badge--${p.service}` }, serviceName(p.service)), ' ',
-  h('b', null, p.name), h('span', { class: 'muted small' },
+  }, h('b', null, p.name), h('span', { class: 'muted small' },
     ` · ${t('{n} items', { n: p.service === 'spotify' && !p.editable && !p.count ? p.remote_count : p.count })}`),
   p.pending ? h('span', { class: 'pl__pending' }, ` ${t('{n} pending', { n: p.pending })}`) : null,
   p.editable ? null : h('span', { class: 'muted small' }, ` · ${t('someone else’s')}`),
@@ -181,12 +185,19 @@ async function draw() {
       h('h2', { class: 'grow' }, t('Playlists')),
       h('a', { class: 'btn', href: '/api/playlists/export', download: '' }, t('Export all (JSON)'))),
     h('p', { class: 'muted' }, t('Your Spotify and YouTube playlists, copied into Stash. Edit them here or ask your assistant (“move every live track to a new playlist”); the changes wait as pending until you push them to the service. The copy is also your backup: it stays even when a playlist disappears from the service.')),
-    h('div', { class: 'pl__accounts' }, data.accounts.map(accountCard)),
-    view.progress ? progressBox() : null,
+    h('div', { class: 'tabs__states pl__tabs' }, data.accounts.map((a) => h('button', {
+      type: 'button', class: view.service === a.service ? 'btn active' : 'btn',
+      onclick: () => { view.service = a.service; view.playlist = null; draw(); },
+    }, serviceName(a.service), ' ', h('span', { class: 'muted small' },
+      `(${data.playlists.filter((p) => p.service === a.service).length})`)))),
+    account ? h('div', { class: 'pl__accounts' }, accountCard(account)) : null,
+    view.progress && view.progress.service === view.service ? progressBox() : null,
     view.problem ? problemBox() : null,
-    view.result && !view.progress ? resultBox() : null,
+    view.result && !view.progress && view.result.service === view.service ? resultBox() : null,
     h('div', { class: 'pl__columns' },
-      h('div', { class: 'pl__lists' }, data.playlists.length ? data.playlists.map(listRow) : h('p', { class: 'empty' }, t('No playlists fetched yet. Connect a service and press “Fetch playlists”.'))),
+      h('div', { class: 'pl__lists' }, shown.length ? shown.map(listRow) : h('p', { class: 'empty' },
+        account?.connected ? t('No playlists fetched yet. Press “Fetch playlists”.')
+          : t('Connect {service} with “Connect…” above, then fetch the playlists.', { service: serviceName(view.service) }))),
       detail && playlistDetail(detail))));
 }
 
@@ -202,6 +213,7 @@ function playlistDetail(d) {
     h('div', { class: 'pl__text' },
       h('a', { href: safeHref(x.url), target: '_blank', rel: 'noopener noreferrer', class: 'pl__title' }, x.title || x.item_id),
       h('div', { class: 'muted small' }, [x.artist, x.duration_ms && duration(x.duration_ms),
+        x.unavailable && t('removed or private on {service}: the title is the last one seen', { service: serviceName(p.service) }),
         x.state === 'added' && t('added'), x.state === 'removed' && t('removed'), x.moved && t('moved')].filter(Boolean).join(' · '))),
     x.state === 'removed'
       ? h('button', { type: 'button', class: 'btn', onclick: () => edit([{ op: 'order', ids: [] }]).then(() => restore(x)) }, t('Keep'))

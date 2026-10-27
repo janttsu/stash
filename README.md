@@ -30,8 +30,10 @@ without handing it to anyone.
    - **Subscriptions**: YouTube channel subscriptions and Spotify's followed artists and playlists, with your
      own tags and notes, a check for channels that have gone quiet, and subscribing or unsubscribing as pending
      changes (see *Subscriptions* below).
-   - **AI**: one section for everything about assistants: connecting one (the MCP address, keys and your
-     standing rules), the handovers it saves, and the changes it made, each undoable.
+   - **AI**: one section for everything about assistants and the tools that work with Stash from outside:
+     connecting one (the MCP address, keys and your standing rules), what it can do, the handovers it saves,
+     the changes it made (each undoable), and **Tools**: a list of every tool with where it is set up, the link
+     check with a local model, the browsing history sync and the API for your own programs.
    - **Trash.** Deleted bookmarks wait 30 days in the trash (account menu → Trash), whichever way they were
      deleted: one at a time, many at once, with a whole category or tab, or through an API key. Every deletion
      shows an Undo button, and restoring puts a bookmark back where it was, making its category again if needed.
@@ -55,7 +57,7 @@ without handing it to anyone.
    really use: it can bring the most used ones to the Dashboard, order bookmarks and categories by use, find
    often visited pages that are not bookmarked yet, and suggest cleaning up the ones unused for years. The
    history is stored only on your own server, is never part of the bookmark export and can be deleted per
-   device in Settings. Before sending, query parameters that often carry secrets (token, session, code, …) are
+   device in AI → Tools. Before sending, query parameters that often carry secrets (token, session, code, …) are
    removed, and whole sites can be left out.
 4. **Link check with a local model** (`scripts/stash-linkcheck.py`): opens each bookmark in a headless Chromium
    on your own computer, clicks cookie banners and age confirmations away, and lets a model in Ollama decide
@@ -294,7 +296,12 @@ only the bookmarks made from it take part in previews, undo and the trash.
 the copy (add by link, remove, drag to reorder, rename; or ask the assistant: "move every live recording from
 Favourites to a new playlist Live") and the changes wait as *pending* until you press **Push**; only then does
 the service change. **Fetch playlists** brings the service's state in; a playlist with pending changes is left
-alone until they are pushed or discarded. **Synchronise** does both ways for a whole service: it pushes the
+alone until they are pushed or discarded. The page has one tab per service. Every fetch takes a YouTube
+video's title from the video itself, so a renamed video is renamed in Stash; a video that has been deleted or
+made private keeps the last title Stash saw, marked as such, instead of YouTube's "Deleted video". When a
+service answers *429 Too Many Requests*, Stash waits as long as it asks (shown on the progress bar) and goes on;
+a wait of more than three minutes ends the fetch with a message saying how long to wait. YouTube's *Watch later*
+and history cannot be read through its API (Google closed them in 2016). **Synchronise** does both ways for a whole service: it pushes the
 pending changes of every playlist (after asking, and naming them), then fetches everything back; a push that
 fails is listed and its changes stay pending. Right after connecting, the first fetch starts by itself. A fetch
 shows a progress bar (playlist *n* of *m*, its name, items so far) and ends with a summary: how many playlists
@@ -447,7 +454,7 @@ Sending the history from the Mac (or Linux computer) where Firefox is used:
 
 ```sh
 curl -o ~/stash-history-sync.py https://stash.example.com/dl/stash-history-sync.py
-python3 ~/stash-history-sync.py --setup       # Stash address, a key (Settings → Browsing history → Create a key
+python3 ~/stash-history-sync.py --setup       # Stash address, a key (AI → Tools → Browsing history → Create a key
                                               # for this computer), a name for this computer
 python3 ~/stash-history-sync.py --dry-run     # shows what would be sent
 python3 ~/stash-history-sync.py --schedule    # sends every 6 hours (launchd / cron)

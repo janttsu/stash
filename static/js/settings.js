@@ -5,16 +5,17 @@ import { setLang, t } from './i18n.js';
 
 let root = null;
 
-export async function renderSettings(container) {
+export async function renderSettings(container, params = {}) {
   root = container;
   root.className = 'view settings';
   const groups = [
     group(t('Look and behaviour'), appearance(), behaviour(), addButtons()),
-    group(t('Bookmarks'), importExport(), linkCheck()),
-    group(t('Assistants and API'), h('section', { class: 'card' },
-      h('p', null, t('Connecting an assistant, its keys and rules, the handovers it saves and the changes it made are in the AI section.')),
-      h('div', { class: 'row' }, h('a', { class: 'btn', href: '#/ai' }, t('Open the AI section'))))),
-    group(t('History'), browsingHistory()),
+    group(t('Bookmarks'), importExport()),
+    group(t('Assistants, tools and API'), h('section', { class: 'card' },
+      h('p', null, t('Everything that works with Stash from outside is in the AI section: connecting an assistant (MCP) with its keys and rules, the link check with a local model, the browsing history sync, the API for your own programs, the handovers assistants save and the changes they made.')),
+      h('div', { class: 'row' },
+        h('a', { class: 'btn', href: '#/ai' }, t('Open the AI section')),
+        h('a', { class: 'btn', href: '#/ai?section=tools' }, t('Tools'))))),
     group(t('Account'), account()),
   ];
   let adminCard = null;
@@ -25,6 +26,8 @@ export async function renderSettings(container) {
   const nav = h('nav', { class: 'settings-nav' }, groups.map(({ title, el }) =>
     h('button', { type: 'button', class: 'linklike', onclick: () => el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, title)));
   fill(root, h('h1', null, t('Settings')), nav, ...groups.map((g) => g.el));
+  // #/settings?section=add or =import: links from the AI page's tool list jump straight to the card
+  if (params.section) document.getElementById(`settings-${params.section}`)?.scrollIntoView({ block: 'start' });
   if (adminCard) await drawAdmin(adminCard);
 }
 
@@ -84,7 +87,7 @@ function addButtons() {
     e.preventDefault();
     toast(t('Drag this button to your bookmarks bar; it does nothing here.'));
   });
-  return h('section', { class: 'card' },
+  return h('section', { class: 'card', id: 'settings-add' },
     h('h2', null, t('Add to Stash button')),
     h('h3', null, t('Desktop: bookmarklet')),
     h('p', null, t('Show the bookmarks bar in your browser (Ctrl+Shift+B) and drag this button onto it. Then click it on any page to bookmark that page. Text you have selected on the page becomes the note.')),
@@ -105,7 +108,7 @@ function addButtons() {
 }
 
 function importExport() {
-  return h('section', { class: 'card' },
+  return h('section', { class: 'card', id: 'settings-import' },
     h('h2', null, t('Import and export')),
     h('p', null, t('Import the bookmarks HTML file of any browser or bookmark manager. Export gives you the same standard format, with tabs and categories as folders and your tags and notes included – a complete backup.')),
     h('div', { class: 'row' },
@@ -301,7 +304,8 @@ export function changeHistoryCard() {
   return card;
 }
 
-function browsingHistory() {
+/** Browsing history sync: the script, a key for it, the devices that sent history. On the AI page (Tools). */
+export function browsingHistory() {
   const card = h('section', { class: 'card' });
   const script = `${location.origin}/dl/stash-history-sync.py`;
   const commands = [
@@ -350,7 +354,8 @@ function browsingHistory() {
   return card;
 }
 
-function linkCheck() {
+/** The link check with a local model: what it does and how to run it. On the AI page (Tools). */
+export function linkCheck() {
   const script = `${location.origin}/dl/stash-linkcheck.py`;
   const python = '~/.local/share/stash-linkcheck/bin/python';
   const commands = [

@@ -70,6 +70,10 @@ class ServiceError(RuntimeError):
 
 GET_TRIES = 3          # a read that times out or loses its connection is tried this many times in all
 RETRY_PAUSE = 2.0      # seconds before the second try, doubled before the third
+RATE_TRIES = 8         # answers of 429 Too Many Requests waited out in one call
+RATE_PAUSE = 5.0       # seconds to wait on a 429 without Retry-After, doubled each time
+MAX_RATE_WAIT = 180    # a longer Retry-After ends the call with a message instead of a long silent wait
+MIN_INTERVAL = {"spotify": 0.12}   # seconds between calls: a long fetch stays under Spotify's rolling limit
 
 
 class _Client(httpx.Client):
@@ -80,18 +84,49 @@ class _Client(httpx.Client):
     def __init__(self, service: str, **kwargs):
         super().__init__(**kwargs)
         self.service = service
+        self._last = 0.0
+
+    progress_key = None    # set by a fetch, so that a wait for the rate limit shows on the progress bar
+
+    def _pace(self) -> None:
+        gap = MIN_INTERVAL.get(self.service, 0)
+        if gap:
+            wait = self._last + gap - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            self._last = time.monotonic()
 
     def send(self, request: httpx.Request, **kwargs) -> httpx.Response:
         tries = GET_TRIES if request.method == "GET" else 1
-        for attempt in range(tries):
+        attempt, limited = 0, 0
+        while True:
+            self._pace()
             try:
-                return super().send(request, **kwargs)
+                response = super().send(request, **kwargs)
             except httpx.TransportError as e:
-                if attempt + 1 >= tries:
+                attempt += 1
+                if attempt >= tries:
                     kind = "timed out" if isinstance(e, httpx.TimeoutException) else "could not be reached"
                     raise ServiceError(self.service, 504, f"the service {kind} ({type(e).__name__})") from e
-                time.sleep(RETRY_PAUSE * (2 ** attempt))
-        raise AssertionError("unreachable")
+                time.sleep(RETRY_PAUSE * (2 ** (attempt - 1)))
+                continue
+            if response.status_code != 429:
+                return response
+            # rate limited: the request was not carried out, so any method may be sent again after the wait
+            # the service asks for (Retry-After, seconds); a wait longer than MAX_RATE_WAIT ends the call
+            try:
+                wait = max(1, int(float(response.headers.get("retry-after", "") or 0)) or RATE_PAUSE * (2 ** limited))
+            except ValueError:
+                wait = RATE_PAUSE * (2 ** limited)
+            limited += 1
+            if wait > MAX_RATE_WAIT or limited > RATE_TRIES:
+                minutes = max(1, round(wait / 60))
+                raise ServiceError(self.service, 429, f"rate_limited: {self.service} asks to wait about {minutes} min "
+                                                      "before more requests; try again then")
+            response.close()
+            _set_progress(self.progress_key, waiting=wait)
+            time.sleep(wait)
+            _set_progress(self.progress_key, waiting=0)
 
 
 def _http(service: str, headers: dict | None = None) -> httpx.Client:
@@ -201,8 +236,11 @@ def _access_token(c: Ctx, service: str) -> str:
     return access
 
 
-def _api(c: Ctx, service: str) -> httpx.Client:
-    return _http(service, {"Authorization": f"Bearer {_access_token(c, service)}", "Accept": "application/json"})
+def _api(c: Ctx, service: str, key=None) -> httpx.Client:
+    """An HTTP client for the user's connection. key: the progress record to show rate-limit waits on."""
+    http = _http(service, {"Authorization": f"Bearer {_access_token(c, service)}", "Accept": "application/json"})
+    http.progress_key = key
+    return http
 
 
 def _profile(c: Ctx, service: str) -> dict:
@@ -401,9 +439,18 @@ def _remote_items(http: httpx.Client, service: str, external_id: str, on_page=No
         token = data.get("nextPageToken")
         if not token:
             break
-    durations = _youtube_videos(http, [x["item_id"] for x in out if x["item_id"]])
+    # the video's own record is the authority for its title and channel: a playlist item's snippet can lag
+    # behind a renamed video. A video that videos.list no longer returns is deleted or private: it is marked
+    # unavailable, and _store_items keeps the last real title Stash saw for it.
+    videos = _youtube_videos(http, [x["item_id"] for x in out if x["item_id"]])
     for x in out:
-        x["duration_ms"] = durations.get(x["item_id"], {}).get("duration_ms", 0)
+        v = videos.get(x["item_id"])
+        if v:
+            x["title"], x["duration_ms"] = v["title"] or x["title"], v["duration_ms"]
+            x["artist"] = v["artist"] or x["artist"]
+            x["unavailable"] = 0
+        else:
+            x["duration_ms"], x["unavailable"] = 0, 1
     return [x for x in out if x["item_id"]]
 
 
@@ -417,12 +464,20 @@ def _iso_time(value) -> Optional[int]:
 
 
 def _store_items(con, playlist_id: int, items: list[dict]) -> None:
+    """Replace the playlist's items with the service's. For an item that has become unavailable (a deleted or
+    private video), the last title and channel Stash had for it are kept instead of YouTube's placeholder."""
+    # an unavailable item's stored title is already the last real one, so it counts too
+    known = {r["item_id"]: (r["title"], r["artist"]) for r in con.execute(
+        "SELECT item_id, title, artist FROM playlist_items WHERE playlist_id=?", (playlist_id,))}
+    for x in items:
+        if x.get("unavailable") and x["item_id"] in known:
+            x["title"], x["artist"] = known[x["item_id"]]
     con.execute("DELETE FROM playlist_items WHERE playlist_id=?", (playlist_id,))
     con.executemany(
         "INSERT INTO playlist_items(playlist_id, position, remote_position, item_id, remote_id, title, artist,"
-        " duration_ms, url, added_at, state) VALUES(?,?,?,?,?,?,?,?,?,?,'synced')",
+        " duration_ms, url, added_at, state, unavailable) VALUES(?,?,?,?,?,?,?,?,?,?,'synced',?)",
         [(playlist_id, i, i, x["item_id"], x["remote_id"], x["title"][:500], x["artist"][:500], x["duration_ms"],
-          x.get("url") or "", x["added_at"]) for i, x in enumerate(items)])
+          x.get("url") or "", x["added_at"], int(x.get("unavailable", 0))) for i, x in enumerate(items)])
 
 
 def progress(c: Ctx, service: str) -> dict:
@@ -465,7 +520,7 @@ def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = 
 def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: bool) -> dict:
     con, t = c.con, db.now()
     fetched, skipped, failed, item_count, metadata_only = 0, [], [], 0, []
-    with _api(c, service) as http:
+    with _api(c, service, key) as http:
         if playlist_id is not None:
             row = playlist(c, playlist_id)
             wanted = [{"external_id": row["external_id"], "name": row["name"], "description": row["description"],
@@ -581,6 +636,7 @@ def overview(c: Ctx) -> dict:
 def item_json(r) -> dict:
     return {"id": r["id"], "position": r["position"], "item_id": r["item_id"], "title": r["title"], "artist": r["artist"],
             "duration_ms": r["duration_ms"], "url": r["url"], "added_at": r["added_at"], "state": r["state"],
+            "unavailable": bool(r["unavailable"]),
             "moved": r["state"] == "synced" and r["remote_position"] is not None and r["remote_position"] != r["position"]}
 
 

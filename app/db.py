@@ -260,7 +260,8 @@ CREATE TABLE IF NOT EXISTS playlist_items (
     duration_ms     INTEGER NOT NULL DEFAULT 0,
     url             TEXT NOT NULL DEFAULT '',
     added_at        INTEGER,
-    state           TEXT NOT NULL DEFAULT 'synced'
+    state           TEXT NOT NULL DEFAULT 'synced',
+    unavailable     INTEGER NOT NULL DEFAULT 0   -- deleted or private on the service; title is the last one seen
 );
 CREATE INDEX IF NOT EXISTS playlist_items_pl ON playlist_items(playlist_id, position);
 -- subscriptions (app/subscriptions.py): YouTube channels, Spotify artists and followed playlists, and YouTube
@@ -385,6 +386,8 @@ def init() -> None:
             con.execute("ALTER TABLE sessions ADD COLUMN remember INTEGER NOT NULL DEFAULT 1")
         if "email" not in {r[1] for r in con.execute("PRAGMA table_info(users)")}:
             con.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
+        if "unavailable" not in {r[1] for r in con.execute("PRAGMA table_info(playlist_items)")}:
+            con.execute("ALTER TABLE playlist_items ADD COLUMN unavailable INTEGER NOT NULL DEFAULT 0")
         # one address, one account (case does not matter); accounts without an address are not compared
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(email COLLATE NOCASE) WHERE email <> ''")
         # these indexes reference the columns added just above, so they come after the migration

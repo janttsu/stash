@@ -110,7 +110,7 @@ async function route() {
   }
   await attempt(async () => {
     if (name === 'bookmarks') await renderBookmarks(view, params);
-    else if (name === 'settings') await renderSettings(view);
+    else if (name === 'settings') await renderSettings(view, params);
     else if (name === 'trash') await renderTrash(view);
     else if (name === 'ai') await renderAI(view, params);
     else if (name === 'tabs') await renderTabs(view, params);
