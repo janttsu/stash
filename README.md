@@ -79,6 +79,9 @@ without handing it to anyone.
 | `app/tabs.py` | Open browser tabs sent to Stash: lists, states, saving as bookmarks |
 | `app/playlists.py` | Spotify and YouTube playlists: OAuth, fetching, pending edits, pushing back |
 | `app/subscriptions.py` | YouTube channel subscriptions, Spotify followed artists and playlists: fetch, tags, push |
+| `app/jobs.py` | Scheduled tasks (media-sync, duplicates): what they do, their records, the overdue check |
+| `app/versions.py` | Version history: a user's own data from a backup, previewed and restored by area |
+| `scripts/systemd/` | systemd user units and timers for the scheduled tasks |
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
 | `app/mcpserver/` | The MCP endpoint `/mcp`: its tools, named result sets, previews and page reading |
 | `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
@@ -153,42 +156,70 @@ written into it. It adds a toolbar button, a right-click *Add link to Stash*, *B
   Developer Edition, Nightly and ESR accept after `xpinstall.signatures.required` is set to false in
   `about:config`.
 
+## Scheduled tasks
+
+Three tasks run on timers. Stash itself only records when each one last ran; if one is late (its timer is
+missing, disabled or failing), every page shows administrators a warning, and Settings → Administration →
+**Scheduled tasks** lists when each ran and what it did. The same list on the server:
+`.venv/bin/python -m app.cli jobs`.
+
+| Task | Suggested schedule | What it does |
+| --- | --- | --- |
+| `backup` (`scripts/backup.sh`) | hourly | the whole database, kept 30 days: the version history (see *Backups* and *Version history*) |
+| `media-sync` (`app.cli job media-sync`) | every 6 hours | fetches every account's playlists and subscriptions from Spotify and YouTube: import only, pushing changes is always the user's own action |
+| `duplicates` (`app.cli job duplicates`) | daily | in every account, tags the later copies of the same address `duplicate` and takes the tag from the oldest copy and from anything that is no longer a duplicate; http and https (and `www.` and a trailing slash) count as the same address |
+
+`media-sync` keeps within the services' limits: it reads the songs of at most 40 changed playlists per account
+and service in one run (the rest come in the next), skips Spotify playlists whose `snapshot_id` has not changed,
+waits between accounts, and sends nothing to a service that has paused the app (a long *429 Too Many Requests*)
+until the pause ends. A YouTube run costs about 1 quota unit per 50 videos of the playlists that are read, so four
+runs a day stay far below the 10 000 daily units. Subscriptions' activity check (1 unit per channel) is not
+scheduled; users start it.
+
+The units are in `scripts/systemd/` (they assume Stash in `~/stash`; change the paths otherwise). As systemd
+user units:
+
+```sh
+cp scripts/systemd/stash-*.service scripts/systemd/stash-*.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now stash-backup.timer stash-media-sync.timer stash-duplicates.timer
+sudo loginctl enable-linger "$USER"        # once: user timers keep running when you are logged out
+systemctl --user list-timers 'stash-*'     # when each runs next
+systemctl --user start stash-media-sync    # run one now; journalctl --user -u stash-media-sync shows its output
+```
+
+If `stash.service` has more environment than its `PATH` (for example `STASH_ORIGIN` or the mail settings), give
+`stash-media-sync.service` the same, or put both under a drop-in. With cron instead of systemd:
+
+```cron
+0 * * * *    cd ~/stash && scripts/backup.sh
+17 */6 * * * cd ~/stash && .venv/bin/python -m app.cli job media-sync
+40 4 * * *   cd ~/stash && .venv/bin/python -m app.cli job duplicates
+```
+
 ## Backups
 
 `scripts/backup.sh` writes a consistent, zstd-compressed copy of the whole database (every account's bookmarks,
-tabs, categories, tags, trash, settings and change history) to `data/backups/stash-YYYY-MM-DD_HHMM.db.zst`, checks
-it with `PRAGMA integrity_check`, and deletes copies older than 30 days (`STASH_BACKUP_DAYS`). It is safe while
-Stash runs. Run hourly, that is a version history of 720 copies, about 1 MB each for a few thousand bookmarks.
-It needs `sqlite3` and `zstd`. As systemd user units:
-
-```ini
-# ~/.config/systemd/user/stash-backup.service
-[Unit]
-Description=Stash: database backup
-
-[Service]
-Type=oneshot
-ExecStart=%h/stash/scripts/backup.sh
-
-# ~/.config/systemd/user/stash-backup.timer
-[Unit]
-Description=Stash: database backup every hour
-
-[Timer]
-OnCalendar=hourly
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
+tabs, categories, tags, trash, playlists, subscriptions, settings and change history) to
+`data/backups/stash-YYYY-MM-DD_HHMM.db.zst`, checks it with `PRAGMA integrity_check`, and deletes copies older
+than 30 days (`STASH_BACKUP_DAYS`). It is safe while Stash runs. Run hourly (see *Scheduled tasks*), that is a
+version history of 720 copies, a few MB each. It needs `sqlite3` and `zstd`.
 
 ```sh
-systemctl --user daemon-reload && systemctl --user enable --now stash-backup.timer
 systemctl --user start stash-backup        # one backup now
 ls data/backups/                           # the copies
 ```
 
 The copies stay on the same disk, so also back up `data/` off the server (for example with restic).
+
+### Version history
+
+Each user can bring their own data back from any of these copies: Settings → **Version history**. They pick a
+moment (every hourly copy of the last two days, then one per day back to 30 days), see how many bookmarks, tabs,
+tags, playlists, subscriptions and open tabs they had then and have now, and restore the parts they choose:
+bookmarks with tabs, categories and tags; playlists; subscriptions; open tabs; settings with the assistant's rules.
+Only their own rows are touched. Just before, the current state is saved as a new copy, so a restore can itself
+be undone; bookmarks that are not in the restored version go to the trash. Users never get the backup file.
 
 To return the whole Stash to an earlier hour, stop it and put the copy in place:
 
@@ -544,6 +575,7 @@ can check and list but not remove). The verdicts are saved in `~/.cache/stash/li
 .venv/bin/python tests/trash.py    # the trash: every way of deleting, restoring, the 30-day limit
 .venv/bin/python tests/account.py  # e-mail addresses, password reset links (once, one hour), two-factor after a reset
 .venv/bin/python tests/maintenance.py  # the background upkeep of titles and icons
+.venv/bin/python tests/jobs.py     # scheduled tasks (duplicates, records, the warning) and restoring from the version history
 .venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end, open tabs, playlists and subscriptions (fake services), handovers (pip install pytest)
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
 node tools/check-i18n.mjs          # missing or broken Finnish and Swedish translations

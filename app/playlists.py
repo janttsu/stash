@@ -525,7 +525,8 @@ def _set_progress(key, **fields) -> None:
                                        "items": 0, "list_read": 0, "list_total": 0}).update(fields)
 
 
-def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = False, *, track: bool = True) -> dict:
+def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = False, *, track: bool = True,
+         budget: Optional[int] = None) -> dict:
     """Fetch the playlists (or one) and their items. A playlist with pending local changes is left alone
     unless force=True, which discards them. track=False leaves the progress record to the caller (sync_all)."""
     service = _service(service)
@@ -536,17 +537,18 @@ def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = 
     if playlist_id is not None and playlist(c, playlist_id)["local"]:
         return refresh_local(c, playlist_id)
     if not track:
-        return _pull(c, service, acc, None, playlist_id, force)
+        return _pull(c, service, acc, None, playlist_id, force, budget)
     _set_progress(key, running=True, phase="fetch", done=0, total=0, name="", items=0)
     try:
-        return _pull(c, service, acc, key, playlist_id, force)
+        return _pull(c, service, acc, key, playlist_id, force, budget)
     finally:
         _set_progress(key, running=False)
 
 
-def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: bool) -> dict:
+def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: bool, budget: Optional[int] = None) -> dict:
+    """budget: read the contents of at most this many playlists (the scheduled fetch); the rest wait for the next run."""
     con, t = c.con, db.now()
-    fetched, skipped, failed, item_count, metadata_only, unchanged = 0, [], [], 0, [], []
+    fetched, skipped, failed, item_count, metadata_only, unchanged, deferred, reads = 0, [], [], 0, [], [], [], 0
     with _api(c, service, key) as http:
         if playlist_id is not None:
             row = playlist(c, playlist_id)
@@ -607,6 +609,11 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
                 metadata_only.append(p["name"])
                 continue
 
+            if budget is not None and reads >= budget:
+                deferred.append(p["name"])   # left as it was, read on a later run
+                continue
+            reads += 1
+
             def on_page(read, total, before=item_count, fallback=int(p.get("remote_count") or 0)):
                 _set_progress(key, list_read=read, list_total=max(int(total or fallback), read), items=before + read)
 
@@ -646,7 +653,7 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
                 con.execute("UPDATE playlist_accounts SET synced_at=? WHERE id=?", (t, acc["id"]))
     return {"service": service, "total": len(wanted), "fetched": fetched, "items": item_count,
             "skipped_with_local_changes": skipped, "failed": failed, "metadata_only": metadata_only,
-            "unchanged": len(unchanged)}
+            "unchanged": len(unchanged), "deferred": deferred}
 
 
 # --- reading ---------------------------------------------------------------------------------------------
@@ -1028,7 +1035,7 @@ def refresh_local(c: Ctx, playlist_id: int) -> dict:
         _store_items(con, playlist_id, items)
         con.execute("UPDATE playlists SET synced_at=?, remote_count=? WHERE id=?", (db.now(), len(items), playlist_id))
     return {"service": "youtube", "total": 1, "fetched": 1, "items": len(items), "skipped_with_local_changes": [],
-            "failed": [], "metadata_only": [], "unchanged": 0}
+            "failed": [], "metadata_only": [], "unchanged": 0, "deferred": []}
 
 
 def forget(c: Ctx, playlist_id: int) -> dict:

@@ -327,7 +327,7 @@ def test_youtube_api_disabled_is_explained(api, stash, fake):
     fake.api_disabled = False   # the user enabled it: fetching works without connecting again
     r = web.post("/api/playlists/accounts/youtube/sync").json()
     assert r == {"service": "youtube", "total": 1, "fetched": 1, "items": 3, "skipped_with_local_changes": [], "failed": [],
-                 "metadata_only": [], "unchanged": 0}
+                 "metadata_only": [], "unchanged": 0, "deferred": []}
 
 
 def test_fetch_summary_and_progress(api, stash, fake):

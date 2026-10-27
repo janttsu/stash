@@ -23,6 +23,14 @@ README.md describes every feature for users; this file is about the work.
   `.claude/worktrees/<name>` on branches `worktree-<name>` and fast-forwarded into `main`.
 - Database: `data/stash.db` (WAL). `scripts/backup.sh` (unit `stash-backup`, hourly timer) writes compressed
   copies to `data/backups/`; run `systemctl --user start stash-backup` before a deploy that changes the schema.
+  These copies are also the users' **version history** (`app/versions.py`, Settings → Version history): a user
+  restores their own rows by area; a restore first runs backup.sh. A new table with user data must be added to
+  `versions.AREAS` (and to `_counts`), or it will not be restorable.
+- Scheduled tasks (`app/jobs.py`, units in `scripts/systemd/`, installed in `~/.config/systemd/user/`, linger on):
+  `stash-backup` hourly, `stash-media-sync` every 6 h (import only, 40 changed playlists per account and service
+  per run, a service's long 429 pause is respected), `stash-duplicates` daily at 04:40. Each run writes
+  `config` key `job:<name>`; `/api/me` gives administrators `jobs_overdue`, shown as a banner. `app.cli jobs`
+  lists them on the server.
 - E-mail (password reset links) is sent directly to the recipient's MX, DKIM-signed. Production shares the
   key and DNS records of another app on the same server through the environment of `stash.service`
   (`STASH_MAIL_FROM`, `STASH_MAIL_HELO`, `STASH_DKIM_KEY`, `STASH_DKIM_SELECTOR`); the repository has no domain

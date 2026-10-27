@@ -9,6 +9,8 @@
   mail-dns                    the DNS records the sending domain needs (SPF and DKIM) for the mail of reset links
   registration <open|invite|closed>
                               who can create an account (ignored while STASH_REGISTRATION is set)
+  job <media-sync|duplicates> run a scheduled task now (timers run them; see app/jobs.py)
+  jobs                        when each scheduled task last ran, and whether it is overdue
 """
 from __future__ import annotations
 
@@ -72,6 +74,21 @@ def main(argv: list[str]) -> int:
         db.set_config(con, "registration", args[0])
         if fixed := os.environ.get("STASH_REGISTRATION"):
             print(f"note: STASH_REGISTRATION={fixed} is set; the server uses it until it is removed", file=sys.stderr)
+    elif cmd == "job" and len(args) == 1 and args[0] in ("media-sync", "duplicates"):
+        from . import jobs
+
+        con.close()
+        result = jobs.RUN[args[0]]()
+        print(f"{args[0]}: {'ok' if result['ok'] else 'FAILED'}: {result['summary']}")
+        return 0 if result["ok"] else 1
+    elif cmd == "jobs":
+        import time
+
+        from . import jobs
+
+        for j in jobs.status(con):
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(j["last_ok"])) if j["last_ok"] else "never"
+            print(f"{j['name']:<12} {'OVERDUE' if j['overdue'] else 'ok':<8} last ok {when}  {j['summary'][:150]}")
     else:
         print(__doc__)
         return 2

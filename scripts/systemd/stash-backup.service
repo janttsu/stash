@@ -1,0 +1,8 @@
+# Stash: hourly backup of the whole database, 30 days kept (the version history users restore from).
+# Copy to ~/.config/systemd/user/ and adjust the path if Stash is not in ~/stash.
+[Unit]
+Description=Stash: database backup
+
+[Service]
+Type=oneshot
+ExecStart=%h/stash/scripts/backup.sh

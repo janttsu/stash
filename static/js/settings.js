@@ -16,19 +16,22 @@ export async function renderSettings(container, params = {}) {
       h('div', { class: 'row' },
         h('a', { class: 'btn', href: '#/ai' }, t('Open the AI section')),
         h('a', { class: 'btn', href: '#/ai?section=tools' }, t('Tools'))))),
+    group(t('Version history'), versionHistory()),
     group(t('Account'), account()),
   ];
   let adminCard = null;
+  let jobsCard = null;
   if (state.user.is_admin) {
     adminCard = h('section', { class: 'card' }, h('h2', null, t('Users and registration')));
-    groups.push(group(t('Administration'), adminCard));
+    jobsCard = h('section', { class: 'card', id: 'settings-jobs' }, h('h2', null, t('Scheduled tasks')));
+    groups.push(group(t('Administration'), jobsCard, adminCard));
   }
   const nav = h('nav', { class: 'settings-nav' }, groups.map(({ title, el }) =>
     h('button', { type: 'button', class: 'linklike', onclick: () => el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, title)));
   fill(root, h('h1', null, t('Settings')), nav, ...groups.map((g) => g.el));
   // #/settings?section=add or =import: links from the AI page's tool list jump straight to the card
   if (params.section) document.getElementById(`settings-${params.section}`)?.scrollIntoView({ block: 'start' });
-  if (adminCard) await drawAdmin(adminCard);
+  if (adminCard) await drawAdmin(adminCard, jobsCard);
 }
 
 // A titled block of cards; returns the title too, so the jump links can point at it.
@@ -510,10 +513,79 @@ async function deleteAccount() {
 
 // --- admin -------------------------------------------------------------------
 
-async function drawAdmin(card) {
+/** Version history: your own data as it was in any hourly backup of the last 30 days, restored by area. */
+function versionHistory() {
+  const card = h('section', { class: 'card', id: 'settings-versions' });
+  const AREA = () => ({
+    bookmarks: [t('Bookmarks, tabs and tags'), (c) => t('{b} bookmarks in {t} tabs, {g} tags', { b: c.bookmarks, t: c.tabs, g: c.tags })],
+    playlists: [t('Playlists'), (c) => t('{p} playlists, {i} items', { p: c.playlists, i: c.playlist_items })],
+    subscriptions: [t('Subscriptions'), (c) => String(c.subscriptions)],
+    open_tabs: [t('Open tabs'), (c) => String(c.open_tabs)],
+    settings: [t('Settings and the rules for the assistant'), () => ''],
+  });
+  const draw = async () => {
+    const data = await attempt(() => api('GET', '/api/versions'));
+    if (!data) return;
+    const pick = h('select', { class: 'input' }, data.versions.map((v) => h('option', { value: v.name }, fmtWhen(v.time))));
+    const detail = h('div');
+    const show = () => attempt(async () => {
+      const p = await api('GET', `/api/versions/${encodeURIComponent(pick.value)}`);
+      const boxes = new Map();
+      fill(detail,
+        h('div', { class: 'tablewrap' }, h('table', { class: 'table' },
+          h('thead', null, h('tr', null, ['', t('Area'), t('Now'), t('In this version')].map((x) => h('th', null, x)))),
+          h('tbody', null, data.areas.map((area) => {
+            const box = h('input', { type: 'checkbox' });
+            boxes.set(area, box);
+            const [label, describe] = AREA()[area];
+            return h('tr', null, h('td', null, box), h('td', null, label), h('td', null, describe(p.now)), h('td', null, describe(p.then)));
+          })))),
+        h('div', { class: 'row' }, h('button', {
+          type: 'button', class: 'btn danger',
+          onclick: async () => {
+            const areas = [...boxes].filter(([, b]) => b.checked).map(([a]) => a);
+            if (!areas.length) { toast(t('Choose what to restore.'), 'error'); return; }
+            if (!await confirmBox(t('Replace the chosen parts of your data with the version of {time}? The current state is saved as a version first, so this can be undone; bookmarks that are not in that version go to the trash.', { time: fmtWhen(p.time) }), { okLabel: t('Restore'), danger: true })) return;
+            const r = await attempt(() => api('POST', `/api/versions/${encodeURIComponent(p.name)}/restore`, { areas }));
+            if (r) { toast(t('Restored. The state just before is the newest version in this list.')); setTimeout(() => location.reload(), 1200); }
+          },
+        }, t('Restore the chosen parts'))));
+    });
+    fill(card,
+      h('h2', null, t('Version history')),
+      h('p', null, t('Stash keeps a copy of everything every hour for 30 days. If something went wrong — bookmarks deleted, tags or a playlist messed up by a mistake or an assistant — choose a moment before it happened and restore the parts you need. Only your own data is restored.')),
+      data.versions.length ? [
+        h('div', { class: 'row' }, h('label', { class: 'field field--inline' }, h('span', null, t('Version')), pick),
+          h('button', { type: 'button', class: 'btn', onclick: show }, t('Show what it contains'))),
+        detail,
+      ] : h('p', { class: 'muted' }, t('No versions yet: the server has not made a backup. Ask the administrator to set up the backup timer.')),
+      h('p', { class: 'muted small' }, t('Single deleted bookmarks are quicker to bring back from the Trash (account menu); bookmark changes made by assistants can also be undone one by one in AI → Changes made with API keys.')));
+  };
+  draw();
+  return card;
+}
+
+/** The scheduled tasks: when each last ran, and a warning with the fix when one is overdue. */
+function drawJobs(card, jobs) {
+  const overdue = jobs.filter((j) => j.overdue);
+  fill(card,
+    h('h2', null, t('Scheduled tasks')),
+    h('p', { class: 'muted' }, t('Timers on the server run these. If one has not run in time, its timer is missing or failing: the README section “Scheduled tasks” has the units to install, and “.venv/bin/python -m app.cli jobs” shows the same list on the server.')),
+    overdue.length ? h('div', { class: 'notice notice--bad' }, t('Not running as they should: {names}', { names: overdue.map((j) => j.name).join(', ') })) : null,
+    h('div', { class: 'tablewrap' }, h('table', { class: 'table' },
+      h('thead', null, h('tr', null, [t('Task'), t('Last run'), t('State'), t('Result')].map((x) => h('th', null, x)))),
+      h('tbody', null, jobs.map((j) => h('tr', null,
+        h('td', null, h('b', null, j.name), h('div', { class: 'muted small' }, j.what)),
+        h('td', null, j.last_run ? fmtWhen(j.last_run) : t('never')),
+        h('td', null, j.overdue ? h('span', { class: 'bad' }, t('overdue')) : j.ok ? t('OK') : h('span', { class: 'bad' }, t('failed'))),
+        h('td', { class: 'wrapcell small' }, j.summary || '–')))))));
+}
+
+async function drawAdmin(card, jobsCard) {
   const data = await attempt(() => api('GET', '/api/admin'));
   if (!data) return;
-  const redraw = () => drawAdmin(card);
+  if (jobsCard) drawJobs(jobsCard, data.jobs);
+  const redraw = () => drawAdmin(card, jobsCard);
   const inviteUrl = (code) => `${location.origin}/?invite=${code}`;
   const open = data.invites.filter((i) => !i.used_at);
 

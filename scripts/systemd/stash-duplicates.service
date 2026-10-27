@@ -1,0 +1,9 @@
+# Stash: tag the later copies of the same address "duplicate" in every account, never the oldest one.
+[Unit]
+Description=Stash: tag duplicate bookmarks
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/stash
+Environment=PATH=%h/stash/.venv/bin:/usr/bin:/bin
+ExecStart=%h/stash/.venv/bin/python -m app.cli job duplicates

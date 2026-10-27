@@ -178,9 +178,14 @@ def client_ip(request: Request) -> str:
 
 
 def user_json(c: Ctx) -> dict:
-    return {"id": c.uid, "username": c.user["username"], "is_admin": bool(c.user["is_admin"]),
-            "totp_on": bool(c.user["totp_on"]), "email": c.user["email"], "settings": c.settings,
-            "favicon_rev": db.get_config(c.con, "favicon_rev", "")}
+    out = {"id": c.uid, "username": c.user["username"], "is_admin": bool(c.user["is_admin"]),
+           "totp_on": bool(c.user["totp_on"]), "email": c.user["email"], "settings": c.settings,
+           "favicon_rev": db.get_config(c.con, "favicon_rev", "")}
+    if c.user["is_admin"]:   # scheduled tasks that have not run in time: the page warns the administrator
+        from . import jobs
+
+        out["jobs_overdue"] = [j["name"] for j in jobs.status(c.con) if j["overdue"]]
+    return out
 
 
 def start_session(con, response: Response, user_id: int, remember: bool = True) -> None:
@@ -776,8 +781,10 @@ def admin_overview(c: Ctx = Depends(admin)):
     invites = [dict(r) for r in c.con.execute(
         "SELECT i.code, i.created_at, i.used_at, u.username AS used_by FROM invites i"
         " LEFT JOIN users u ON u.id=i.used_by ORDER BY i.created_at DESC LIMIT 200")]
+    from . import jobs
+
     return {"registration": registration_mode(c.con), "registration_fixed": REGISTRATION_ENV is not None,
-            "users": users, "invites": invites}
+            "users": users, "invites": invites, "jobs": jobs.status(c.con)}
 
 
 class AdminConfig(BaseModel):
@@ -1380,21 +1387,29 @@ def loose_url(url: str) -> str:
     return (host.lower() + sep + rest).rstrip("/")
 
 
+def mark_duplicates(con, uid: int, tag: str = "duplicate", strict: bool = True, mark: str = "duplicates") -> dict:
+    """Give the tag to the bookmarks that share an address with an older one (mark="both": to all of them),
+    and take it from every other bookmark, so it is never on the oldest copy and never on a bookmark that is no
+    longer a duplicate. Only bookmarks whose tags change are touched. strict=False matches addresses the
+    loose way (http and https, a leading www. and a trailing slash do not matter)."""
+    tag = norm_tag(tag) or "duplicate"
+    with db.tx(con):
+        groups: dict[str, list[int]] = {}
+        for r in con.execute("SELECT id, url FROM bookmarks WHERE user_id=? ORDER BY created_at, id", (uid,)):
+            groups.setdefault(r["url"] if strict else loose_url(r["url"]), []).append(r["id"])
+        dupes = [ids for ids in groups.values() if len(ids) > 1]
+        want = {i for ids in dupes for i in (ids if mark == "both" else ids[1:])}
+        have = set(ids_with_tag(con, uid, tag))
+        remove_tags(con, have - want, [tag])
+        add_tags(con, want - have, [tag])
+        db.reindex(con, have ^ want)
+    return {"groups": len(dupes), "duplicates": sum(len(ids) - 1 for ids in dupes), "tag": tag,
+            "tagged": len(want - have), "untagged": len(have - want)}
+
+
 @app.post("/api/tools/duplicates")
 def find_duplicates(body: Duplicates, c: Ctx = Depends(ctx)):
-    tag = norm_tag(body.tag) or "duplicate"
-    con = c.con
-    with db.tx(con):
-        stale = ids_with_tag(con, c.uid, tag)
-        remove_tags(con, stale, [tag])
-        groups: dict[str, list[int]] = {}
-        for r in con.execute("SELECT id, url FROM bookmarks WHERE user_id=? ORDER BY created_at, id", (c.uid,)):
-            groups.setdefault(r["url"] if body.strict else loose_url(r["url"]), []).append(r["id"])
-        dupes = [ids for ids in groups.values() if len(ids) > 1]
-        tagged = [i for ids in dupes for i in (ids if body.mark == "both" else ids[1:])]
-        add_tags(con, tagged, [tag])
-        db.reindex(con, set(stale) | set(tagged))
-    return {"groups": len(dupes), "duplicates": sum(len(ids) - 1 for ids in dupes), "tag": tag}
+    return mark_duplicates(c.con, c.uid, body.tag, body.strict, body.mark)
 
 
 JOBS: dict[int, dict] = {}
@@ -1704,11 +1719,12 @@ app.include_router(history.v1)    # before api_v1: /api/v1/history/... must not 
 app.include_router(history.session_api)
 app.include_router(api_v1.v1)
 app.include_router(api_v1.session_api)
-from . import handover, playlists, subscriptions, tabs  # noqa: E402
+from . import handover, playlists, subscriptions, tabs, versions  # noqa: E402
 app.include_router(handover.session_api)
 app.include_router(tabs.session_api)
 app.include_router(playlists.session_api)
 app.include_router(subscriptions.session_api)
+app.include_router(versions.session_api)
 
 HISTORY_SCRIPT = BASE / "scripts" / "stash-history-sync.py"
 SCRIPTS = {p.name: p for p in (HISTORY_SCRIPT, BASE / "scripts" / "stash-linkcheck.py")}

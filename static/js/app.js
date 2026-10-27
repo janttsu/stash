@@ -90,6 +90,11 @@ function shell() {
           { label: t('Sign out'), action: () => attempt(async () => { await api('POST', '/api/logout'); location.href = '/'; }) },
         ]),
       }, icon('user'), h('span', { class: 'top__username' }, state.user.username))),
+    // administrators: a scheduled task (backup, fetching, duplicates) has not run in time, i.e. its timer is
+    // missing or failing on the server
+    state.user.jobs_overdue?.length ? h('div', { class: 'jobs-warning', role: 'alert' },
+      t('Scheduled tasks are not running on the server: {names}.', { names: state.user.jobs_overdue.join(', ') }), ' ',
+      h('a', { href: '#/settings?section=jobs' }, t('Details'))) : null,
     h('main', { id: 'view' }));
 }
 

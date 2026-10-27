@@ -1,0 +1,13 @@
+# Stash: fetch every account's playlists and subscriptions from Spotify and YouTube (import only). Small batches,
+# Spotify's unchanged playlists skipped, a service's pause respected. Set the same environment as stash.service
+# (at least STASH_ORIGIN) if the service has more than its PATH.
+[Unit]
+Description=Stash: fetch playlists and subscriptions
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/stash
+Environment=PATH=%h/stash/.venv/bin:/usr/bin:/bin
+ExecStart=%h/stash/.venv/bin/python -m app.cli job media-sync
+TimeoutStartSec=2h
+Nice=10

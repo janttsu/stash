@@ -1,0 +1,10 @@
+[Unit]
+Description=Stash: fetch playlists and subscriptions every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:17:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
