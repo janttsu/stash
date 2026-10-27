@@ -73,6 +73,7 @@ def _users(con, sql: str):
 def media_sync() -> dict:
     """Import only: playlists and subscriptions of every account with a music service connected. A service that
     has paused the app is skipped until the pause ends; one account's failure does not stop the others."""
+    from . import main  # noqa: F401  (first: in a process of its own, main must load playlists and subscriptions)
     from . import playlists, subscriptions
 
     con = db.connect()

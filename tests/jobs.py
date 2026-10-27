@@ -79,6 +79,11 @@ def main():
         assert "jobs_overdue" not in other.get("/api/me").json(), "other accounts are not"
         r = jobs.media_sync()
         assert r["ok"] and r["summary"] == "no music service connected"
+        # as the timers run them: each task in a process of its own (a wrong import order shows only there)
+        for name in ("media-sync", "duplicates"):
+            run = subprocess.run([sys.executable, "-m", "app.cli", "job", name], cwd=ROOT, capture_output=True, text=True,
+                                 env=os.environ)
+            assert run.returncode == 0 and f"{name}: ok" in run.stdout, run.stderr[-800:]
         backup()
         assert web.get("/api/me").json()["jobs_overdue"] == []
         assert {j["name"] for j in web.get("/api/admin").json()["jobs"]} == {"backup", "media-sync", "duplicates"}
