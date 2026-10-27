@@ -16,8 +16,9 @@ README.md describes every feature for users; this file is about the work.
 
 ## Where it runs
 
-- Production: `stash.example.org`, served by Caddy in front of a systemd **user** unit `stash.service`
-  (uvicorn on 127.0.0.1:8003) that runs the `main` checkout in `~/stash` directly. `systemctl --user restart stash`
+- Production: the owner's own server (its name is not in this repository), Caddy with HTTPS in front of a
+  systemd **user** unit `stash.service` (uvicorn on 127.0.0.1:8003) that runs the `main` checkout in `~/stash`
+  directly. `systemctl --user restart stash`
   after code changes; `journalctl --user -u stash -f` for logs. Changes under `static/` need no restart.
 - Repository: `git@github.com:janttsu/stash.git`, branch `main`. Features are developed in worktrees under
   `.claude/worktrees/<name>` on branches `worktree-<name>` and fast-forwarded into `main`.
@@ -33,8 +34,9 @@ README.md describes every feature for users; this file is about the work.
   lists them on the server.
 - E-mail (password reset links) is sent directly to the recipient's MX, DKIM-signed. Production shares the
   key and DNS records of another app on the same server through the environment of `stash.service`
-  (`STASH_MAIL_FROM`, `STASH_MAIL_HELO`, `STASH_DKIM_KEY`, `STASH_DKIM_SELECTOR`); the repository has no domain
-  names in it. `python -m app.cli mail-dns` prints the records a fresh setup would need.
+  (`STASH_MAIL_FROM`, `STASH_MAIL_HELO`, `STASH_DKIM_KEY`, `STASH_DKIM_SELECTOR`); the repository has no real
+  domain names, host names, account ids or project numbers in it, and its history was rewritten on 2026-10-27 to
+  take out the ones that had slipped in. Keep it that way: fixtures use example domains and made-up numbers. `python -m app.cli mail-dns` prints the records a fresh setup would need.
 
 ## How to work on it
 
@@ -107,9 +109,18 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   scope gained `user-follow-read user-follow-modify`; older connections get `reconnect_needed:spotify`.
   YouTube has no API for playlists saved from others, so those are `state='local'` entries, never pushed.
   To check on first real use: the subscriptions list order/paging on a large account, and the quota of
-  the activity check (1 unit per channel).
+  the activity check (1 unit per channel). Since 2026-10-27 `media-sync` also runs the activity check in the
+  background (`jobs._stale_activity`: channels not checked for `ACTIVITY_EVERY`, at most `ACTIVITY_BATCH`=200
+  per account per run, oldest first; `tests/mcp/test_subscriptions.py::test_scheduled_activity_check`).
 - **Handovers** (`app/handover.py`, `static/js/handover.js` as a card on the AI page): done, tests in
   `tests/mcp/test_handover.py`; checked live on production with a throwaway account on 2026-10-26.
+- **Live redraw of every page** (2026-10-27): `users.rev` is bumped by triggers (`db.REV_TRIGGERS`) and open
+  pages watch it through `/api/events`; `app.js` `scheduleRedraw()` re-routes any page other than the dashboard
+  and bookmarks. Until 2026-10-27 only bookmarks, tags, categories, tabs and trash had triggers, so the
+  Playlists, Subscriptions, Open tabs and AI pages did not follow changes made elsewhere; now `playlists`,
+  `playlist_items`, `subscriptions`, `open_tab_lists`, `open_tabs`, `handovers` and `handover_versions` bump
+  it too (`tests/smoke.py`). A fetch of a big playlist bumps it per row, which is at most one redraw per
+  `EVENT_POLL`; the busy check in `app.js` still holds a redraw while a dialog is open or a field is focused.
 - **AI section** (`static/js/ai.js`): the assistant card and change history moved here from Settings
   (`settings.js` exports them as `assistantCard()` and `changeHistoryCard()`); Settings → Assistants and API
   only points here. `#/handovers` still routes to the AI page.

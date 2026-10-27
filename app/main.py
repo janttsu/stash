@@ -585,7 +585,8 @@ EVENT_LIFETIME = 300    # then the stream ends and the browser reconnects (and t
 
 @app.get("/api/events")
 async def events(request: Request, c: Ctx = Depends(ctx)):
-    """Server-sent events: one message whenever this user's bookmarks, tags, categories or tabs change."""
+    """Server-sent events: one message whenever something this user sees changes: bookmarks, tags, categories,
+    tabs, playlists and their videos or tracks, subscriptions, open tabs or handovers."""
     uid = c.uid
 
     async def stream():

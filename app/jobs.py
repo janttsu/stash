@@ -2,7 +2,8 @@
 
   backup        scripts/backup.sh, hourly: the 30-day version history of everything
   media-sync    every 6 hours: fetch every connected account's playlists and subscriptions (import only; pushing
-                changes stays a thing the user starts), in small batches and within the services' limits
+                changes stays a thing the user starts), in small batches and within the services' limits, and
+                look up when YouTube channels last published, each channel about once a day
   duplicates    daily: tag the later copies of the same address "duplicate", never the oldest one
 
     .venv/bin/python -m app.cli job media-sync
@@ -29,6 +30,8 @@ JOBS = {
     "duplicates": (28, "daily duplicate tagging"),
 }
 PLAYLIST_BATCH = 40          # playlists whose songs are read per account and service in one run
+ACTIVITY_BATCH = 200         # YouTube channels whose newest upload is looked up per account in one run (1 quota unit each)
+ACTIVITY_EVERY = 24 * 3600   # a channel is looked up again after this
 PAUSE_BETWEEN = 5            # seconds between accounts and services, to spread the requests
 
 
@@ -86,15 +89,20 @@ def media_sync() -> dict:
                 time.sleep(PAUSE_BETWEEN)
             c = _users(con, f"SELECT * FROM users WHERE id={int(acc['user_id'])}")[0]
             who = f"{c.user['username']}/{acc['service']}"
-            for label, run in (("playlists", lambda: playlists.pull(c, acc["service"], budget=PLAYLIST_BATCH)),
-                               ("subscriptions", lambda: subscriptions.pull(c, acc["service"]))):
+            steps = [("playlists", lambda: playlists.pull(c, acc["service"], budget=PLAYLIST_BATCH)),
+                     ("subscriptions", lambda: subscriptions.pull(c, acc["service"]))]
+            if acc["service"] == "youtube":
+                steps.append(("activity", lambda: _stale_activity(c)))
+            for label, run in steps:
                 try:
                     r = run()
                     if label == "playlists":
                         lines.append(f"{who} playlists: {r['fetched']}/{r['total']} ({r.get('unchanged', 0)} unchanged,"
                                      f" {len(r.get('deferred', []))} for a later run, {len(r['failed'])} failed)")
-                    else:
+                    elif label == "subscriptions":
                         lines.append(f"{who} subscriptions: {r['total']} ({r['new']} new, {r['gone']} gone)")
+                    else:
+                        lines.append(f"{who} activity: {r['checked']}/{r['total']} channels ({len(r['failed'])} failed)")
                 except playlists.ServiceError as e:
                     code = playlists.problem_code(c, e)
                     lines.append(f"{who} {label}: {code}")
@@ -113,6 +121,20 @@ def media_sync() -> dict:
         raise
     finally:
         con.close()
+
+
+def _stale_activity(c) -> dict:
+    """The newest-upload date of the YouTube channels not looked at for a day, the longest-waiting first, at most
+    ACTIVITY_BATCH of them: with four runs a day every channel of an account of up to 800 is seen daily."""
+    from . import subscriptions
+
+    ids = [r[0] for r in c.con.execute(
+        "SELECT id FROM subscriptions WHERE user_id=? AND service='youtube' AND kind='channel' AND state<>'local'"
+        " AND (activity_checked IS NULL OR activity_checked<?) ORDER BY activity_checked LIMIT ?",
+        (c.uid, db.now() - ACTIVITY_EVERY, ACTIVITY_BATCH)).fetchall()]
+    if not ids:
+        return {"total": 0, "checked": 0, "failed": []}
+    return subscriptions.check_activity(c, "youtube", ids)
 
 
 def duplicates() -> dict:

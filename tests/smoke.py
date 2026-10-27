@@ -87,6 +87,25 @@ with TestClient(app):  # runs startup (schema creation)
     con.execute("UPDATE bookmarks SET title='direct' WHERE id=?", (live_id,))  # e.g. the upkeep or a server command
     assert rev("alice") > r1
     ok(a.delete(f"/api/bookmarks/{live_id}"))
+    # the newer pages count too, however the rows change (here: as a fetch or a scheduled job would write them)
+    r2 = rev("alice")
+    uid = con.execute("SELECT id FROM users WHERE username='alice'").fetchone()[0]
+    pl = con.execute("INSERT INTO playlists(user_id, service, external_id, name, local) VALUES(?,?,?,?,1)",
+                     (uid, "youtube", "stash:test", "Live")).lastrowid
+    assert rev("alice") > r2, "a new playlist is a change"
+    r3 = rev("alice")
+    con.execute("INSERT INTO playlist_items(playlist_id, item_id, title) VALUES(?,?,?)", (pl, "abcdefghijk", "Clip"))
+    assert rev("alice") > r3, "a playlist's items are a change"
+    r4 = rev("alice")
+    con.execute("UPDATE playlists SET synced_at=1 WHERE id=?", (pl,))
+    assert rev("alice") > r4 and rev("bob") == other0
+    con.execute("DELETE FROM playlists WHERE id=?", (pl,))
+    r5 = rev("alice")
+    con.execute("INSERT INTO subscriptions(user_id, service, kind, external_id, title) VALUES(?,?,?,?,?)",
+                (uid, "youtube", "channel", "UC_live", "Live"))
+    assert rev("alice") > r5, "subscriptions are a change"
+    con.execute("DELETE FROM subscriptions WHERE user_id=? AND external_id='UC_live'", (uid,))
+    con.commit()
     main_module.EVENT_LIFETIME = 0  # end the stream right after the first message
     with a.stream("GET", "/api/events") as stream:
         assert stream.status_code == 200 and stream.headers["content-type"].startswith("text/event-stream")

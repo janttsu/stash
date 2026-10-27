@@ -326,6 +326,26 @@ REV_TRIGGERS = "".join(
         ("cat_upd", "UPDATE", "categories", "NEW.user_id"),
         ("cat_del", "DELETE", "categories", "OLD.user_id"),
         ("trash_del", "DELETE", "trash", "OLD.user_id"),
+        # the newer pages: playlists, subscriptions, open tabs and handovers, whether changed from the page itself,
+        # by an assistant over MCP, by a fetch from the service or by a scheduled job
+        ("pl_ins", "INSERT", "playlists", "NEW.user_id"),
+        ("pl_upd", "UPDATE OF name, description, public, remote_count, synced_at, dirty, gone, local", "playlists", "NEW.user_id"),
+        ("pl_del", "DELETE", "playlists", "OLD.user_id"),
+        ("pli_ins", "INSERT", "playlist_items", "(SELECT user_id FROM playlists WHERE id=NEW.playlist_id)"),
+        ("pli_upd", "UPDATE", "playlist_items", "(SELECT user_id FROM playlists WHERE id=NEW.playlist_id)"),
+        ("pli_del", "DELETE", "playlist_items", "(SELECT user_id FROM playlists WHERE id=OLD.playlist_id)"),
+        ("sub_ins", "INSERT", "subscriptions", "NEW.user_id"),
+        ("sub_upd", "UPDATE", "subscriptions", "NEW.user_id"),
+        ("sub_del", "DELETE", "subscriptions", "OLD.user_id"),
+        ("otl_ins", "INSERT", "open_tab_lists", "NEW.user_id"),
+        ("otl_upd", "UPDATE", "open_tab_lists", "NEW.user_id"),
+        ("otl_del", "DELETE", "open_tab_lists", "OLD.user_id"),
+        ("ot_ins", "INSERT", "open_tabs", "NEW.user_id"),
+        ("ot_upd", "UPDATE", "open_tabs", "NEW.user_id"),
+        ("ot_del", "DELETE", "open_tabs", "OLD.user_id"),
+        ("ho_ins", "INSERT", "handovers", "NEW.user_id"),
+        ("ho_del", "DELETE", "handovers", "OLD.user_id"),
+        ("hov_ins", "INSERT", "handover_versions", "(SELECT user_id FROM handovers WHERE id=NEW.handover_id)"),
     ))
 
 TRASH_TRIGGERS = """

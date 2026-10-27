@@ -172,6 +172,36 @@ def test_activity_and_stash_only_playlists(api, stash, fake):
     assert stats["local"] == 1 and stats["by_kind"] == {"channel": 3, "playlist": 1}
 
 
+def test_scheduled_activity_check(api, stash, fake):
+    """media-sync looks up the channels not checked for a day, the longest-waiting first, and leaves the rest."""
+    from app import db, jobs
+    from app.main import Ctx
+
+    web = stash["web"]
+    connect(stash, "youtube")
+    web.post("/api/subscriptions/youtube/sync")
+    con = db.connect()
+    c = Ctx(con, con.execute("SELECT * FROM users WHERE username='tester'").fetchone())
+    fake.calls.clear()
+    r = jobs._stale_activity(c)
+    assert r["checked"] == 3 and r["failed"] == [], r
+    assert jobs._stale_activity(c)["total"] == 0, "nothing is due again for a day"
+    con.execute("UPDATE subscriptions SET activity_checked=activity_checked-90000 WHERE title='Beta Cooking'")
+    con.execute("UPDATE subscriptions SET activity_checked=NULL WHERE title='Gamma Quiet'")
+    con.commit()
+    monkey = jobs.ACTIVITY_BATCH
+    jobs.ACTIVITY_BATCH = 1
+    try:
+        assert jobs._stale_activity(c)["total"] == 1, "the batch size holds"
+        assert con.execute("SELECT activity_checked FROM subscriptions WHERE title='Gamma Quiet'").fetchone()[0], \
+            "the never-checked channel goes first"
+    finally:
+        jobs.ACTIVITY_BATCH = monkey
+    assert jobs._stale_activity(c)["checked"] == 1, "then the stale one"
+    assert not [x for x in fake.calls if x.startswith("POST")], "the check sends nothing"
+    con.close()
+
+
 def test_spotify_artists_and_followed_playlists(api, stash, fake):
     web = stash["web"]
     connect(stash, "spotify")

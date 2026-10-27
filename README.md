@@ -37,9 +37,10 @@ without handing it to anyone.
    - **Trash.** Deleted bookmarks wait 30 days in the trash (account menu → Trash), whichever way they were
      deleted: one at a time, many at once, with a whole category or tab, or through an API key. Every deletion
      shows an Undo button, and restoring puts a bookmark back where it was, making its category again if needed.
-   - **Always current.** An open page redraws itself when the bookmarks change anywhere: in another tab or
-     device, through an API key or MCP client, or in the background upkeep. It waits while you are typing, dragging
-     or have a dialog open.
+   - **Always current.** An open page redraws itself when its data changes anywhere: bookmarks, open tabs,
+     playlists, subscriptions or handovers changed in another tab or device, through an API key or MCP client, by a
+     fetch from YouTube or Spotify, or by a scheduled task. It waits while you are typing, dragging or have a dialog
+     open.
    - **Keeps titles and icons up to date.** In the background Stash gives unnamed bookmarks their page's real
      title and fetches site icons again (see *Background upkeep* below). Each account can switch this off.
    - The web UI and the browser extension speak **English, Finnish and Swedish** (Settings → Language, or the
@@ -166,15 +167,17 @@ missing, disabled or failing), every page shows administrators a warning, and Se
 | Task | Suggested schedule | What it does |
 | --- | --- | --- |
 | `backup` (`scripts/backup.sh`) | hourly | the whole database, kept 30 days: the version history (see *Backups* and *Version history*) |
-| `media-sync` (`app.cli job media-sync`) | every 6 hours | fetches every account's playlists and subscriptions from Spotify and YouTube: import only, pushing changes is always the user's own action |
+| `media-sync` (`app.cli job media-sync`) | every 6 hours | fetches every account's playlists and subscriptions from Spotify and YouTube (import only, pushing changes is always the user's own action) and looks up when each YouTube channel last published |
 | `duplicates` (`app.cli job duplicates`) | daily | in every account, tags the later copies of the same address `duplicate` and takes the tag from the oldest copy and from anything that is no longer a duplicate; http and https (and `www.` and a trailing slash) count as the same address |
 
 `media-sync` keeps within the services' limits: it reads the songs of at most 40 changed playlists per account
 and service in one run (the rest come in the next), skips Spotify playlists whose `snapshot_id` has not changed,
 waits between accounts, and sends nothing to a service that has paused the app (a long *429 Too Many Requests*)
 until the pause ends. A YouTube run costs about 1 quota unit per 50 videos of the playlists that are read, so four
-runs a day stay far below the 10 000 daily units. Subscriptions' activity check (1 unit per channel) is not
-scheduled; users start it.
+runs a day stay far below the 10 000 daily units. The same run also keeps the subscriptions' activity (each
+YouTube channel's newest upload, 1 unit per channel) current: the channels not looked at for a day, at most 200
+per account per run, so an account of up to 800 channels is covered daily. **Check activity** on the page does the
+same at once.
 
 The units are in `scripts/systemd/` (they assume Stash in `~/stash`; change the paths otherwise). As systemd
 user units:
