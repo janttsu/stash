@@ -114,6 +114,13 @@ class LocalAPI:
             try:
                 return fn(c)
             except playlists.ServiceError as e:
+                code = playlists.problem_code(c, e)
+                if code.startswith("youtube_api_disabled"):
+                    project = code.split(":", 1)[1]
+                    raise StashError(409, "youtube_api_disabled: the YouTube Data API v3 is not enabled in the user's "
+                                          f"Google Cloud project {project}. Ask the user to enable it at "
+                                          f"https://console.cloud.google.com/apis/library/youtube.googleapis.com?project={project}"
+                                          ", wait a minute and try again.") from e
                 raise StashError(502, f"{e.service} answered {e.status}: {e.message}") from e
         return self._call(run)
 

@@ -21,6 +21,8 @@ class Fake:
         self.youtube = {"PL1": {"title": "Live", "description": "", "privacy": "private",
                                 "items": [("item-a", "vidvidvid01"), ("item-b", "vidvidvid02"), ("item-c", "vidvidvid03")]}}
         self.next_item = 0
+        self.api_disabled = False      # Google's answer while the YouTube Data API is off in the client's project
+        self.broken = set()            # playlist ids whose items the service refuses
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         u = urlsplit(str(request.url))
@@ -67,6 +69,11 @@ class Fake:
 
     # --- YouTube --------------------------------------------------------------------------------
     def youtube_api(self, request, path, q, body):
+        if self.api_disabled:
+            return httpx.Response(403, json={"error": {"code": 403, "message": "YouTube Data API v3 has not been used in "
+                                                       "project 123456789012 before or it is disabled. Enable it by visiting …"}})
+        if path == "/playlistItems" and request.method == "GET" and q.get("playlistId") in self.broken:
+            return httpx.Response(404, json={"error": {"message": "playlistNotFound"}})
         if path == "/channels":
             return httpx.Response(200, json={"items": [{"id": "UC1", "snippet": {"title": "My channel"}}]})
         if path == "/videos":
@@ -132,7 +139,7 @@ def connect(stash, service):
     state = parse_qs(url.query)["state"][0]
     assert parse_qs(url.query)["redirect_uri"][0].endswith(f"/api/playlists/accounts/{service}/callback")
     r = web.get(f"/api/playlists/accounts/{service}/callback?code=abc&state={state}", follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == f"/#/playlists?connected={service}", r.text
+    assert r.status_code == 303 and r.headers["location"] == f"/#/playlists?connected={service}&fetch=1", r.text
     return r
 
 
@@ -244,7 +251,7 @@ def test_mcp_tools(api, stash, fake):
     err, text = mcp.call("playlists_overview")
     assert not err and "spotify: connected as Me" in text and "youtube: not connected" in text and "No playlists fetched yet" in text
     err, text = mcp.call("playlists_sync", service="spotify")
-    assert not err and text == "Fetched 2 playlists from spotify."
+    assert not err and text == "Fetched 2 of 2 playlists (4 items) from spotify."
     err, text = mcp.call("playlists_overview")
     assert "[spotify] Chill — 3 items" in text and "Not mine — 1 items, someone else's" in text
     pid = int(next(line for line in text.splitlines() if "Chill" in line).split()[0][1:])
@@ -270,3 +277,56 @@ def test_mcp_tools(api, stash, fake):
     assert err and "no_such_playlist" in text
     err, text = mcp.call("playlists_sync", service="youtube")
     assert err and "not_connected" in text
+
+
+def test_youtube_api_disabled_is_explained(api, stash, fake):
+    """Google lets the user connect while the YouTube Data API is off, then refuses everything: the page gets a
+    code with the project number (to link to the right API page) instead of a raw 403, and so does MCP."""
+    web = stash["web"]
+    fake.api_disabled = True
+    r = web.post("/api/playlists/accounts/youtube/connect",
+                 json={"client_id": "123456789012-x.apps.googleusercontent.com", "client_secret": "s"})
+    state = parse_qs(urlsplit(r.json()["url"]).query)["state"][0]
+    r = web.get(f"/api/playlists/accounts/youtube/callback?code=abc&state={state}", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/#/playlists?connected=youtube&problem=youtube_api_disabled%3A123456789012"
+    accounts = web.get("/api/playlists").json()["accounts"]
+    assert next(a for a in accounts if a["service"] == "youtube")["connected"], "the tokens are kept"
+    r = web.post("/api/playlists/accounts/youtube/sync")
+    assert r.status_code == 409 and r.json()["detail"] == "youtube_api_disabled:123456789012"
+    err, text = Client(stash["raw"], new_key(stash)["key"]).call("playlists_sync", service="youtube")
+    assert err and "youtube.googleapis.com?project=123456789012" in text
+    fake.api_disabled = False   # the user enabled it: fetching works without connecting again
+    r = web.post("/api/playlists/accounts/youtube/sync").json()
+    assert r == {"service": "youtube", "total": 1, "fetched": 1, "items": 3, "skipped_with_local_changes": [], "failed": []}
+
+
+def test_fetch_summary_and_progress(api, stash, fake):
+    """One playlist the service will not give does not stop the others; the summary says which and why."""
+    from app import playlists as pl
+
+    web = stash["web"]
+    connect(stash, "youtube")
+    fake.youtube["PL9"] = {"title": "Broken", "description": "", "privacy": "private", "items": [("x", "vidvidvid07")]}
+    fake.broken.add("PL9")
+    assert web.get("/api/playlists/accounts/youtube/progress").json() == {"running": False}
+    r = web.post("/api/playlists/accounts/youtube/sync").json()
+    assert r["total"] == 2 and r["fetched"] == 1 and r["items"] == 3
+    assert r["failed"] == [{"name": "Broken", "error": "404 playlistNotFound"}]
+    assert web.get("/api/playlists/accounts/youtube/progress").json() == {"running": False}, "cleared when done"
+    # while a fetch runs, the progress endpoint reports it
+    seen = []
+    real = pl._remote_items
+
+    def watching(http, service, external_id):
+        seen.append(web.get("/api/playlists/accounts/youtube/progress").json())
+        return real(http, service, external_id)
+
+    pl._remote_items = watching
+    try:
+        web.post("/api/playlists/accounts/youtube/sync")
+    finally:
+        pl._remote_items = real
+    assert seen[0]["running"] and seen[0]["total"] == 2 and seen[0]["done"] == 0 and seen[0]["name"] == "Live"
+    assert seen[1]["done"] == 1 and seen[1]["items"] == 3 and seen[1]["name"] == "Broken"
+    assert stash["raw"].get("/api/playlists/accounts/youtube/progress").status_code == 401

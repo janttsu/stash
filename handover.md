@@ -71,7 +71,10 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   account: the OAuth round trip through Caddy works. What the real setup taught (now in the page's guide and
   README): the consent screen must exist before a client can be made; only *Test users* worked, publishing
   the app did not; a Desktop-app client is the wrong kind; the YouTube Data API must be enabled in the client's
-  own project, else the connection succeeds and fetching fails. Still to check: Spotify for real, Spotify's
+  own project, else the connection succeeds and fetching fails; that case is now recognised
+  (`problem_code()` → `youtube_api_disabled:<project>`) and the page shows a notice with the direct link. A
+  fetch reports progress through `GET /api/playlists/accounts/<service>/progress` (in-memory, one process)
+  and returns a summary (`total`, `fetched`, `items`, `skipped_with_local_changes`, `failed`). Still to check: Spotify for real, Spotify's
   `/tracks` on more than 100 items, YouTube quota use on a push, and the 7-day end of a *Testing* connection.
   Tokens are refreshed when expired; a failed refresh asks the user to connect again. Items with no id
   (Spotify local files) are skipped.

@@ -300,6 +300,13 @@ img.fav { background: var(--fav-plate, transparent); }
 .pl__pos { min-width: 2.5em; text-align: right; }
 .pl__text { flex: 1; min-width: 0; }
 .pl__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pl__progress, .pl__result { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); display: flex; flex-direction: column; gap: 6px; }
+.pl__progress .row, .pl__result .row { gap: 8px; align-items: center; flex-wrap: wrap; }
+.pl__progress progress { width: 100%; height: 10px; accent-color: var(--accent); }
+.pl__result--ok { border-color: color-mix(in srgb, #2e7d32 50%, var(--border)); }
+.pl__result--bad { border-color: color-mix(in srgb, #c62828 55%, var(--border)); }
+.pl__result ol, .pl__result ul { margin: 0; padding-left: 20px; }
+.pl__result p { margin: 0; }
 .pl__guide ol { padding-left: 20px; margin: 0 0 10px; }
 .pl__guide li { margin-bottom: 6px; }
 .pl__guide .row { gap: 8px; align-items: center; flex-wrap: wrap; }

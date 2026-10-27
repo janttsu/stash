@@ -497,7 +497,8 @@ class Session:
         r = self.api.playlists_sync(service, force)
         skipped = f"; left alone because of pending changes: {', '.join(r['skipped_with_local_changes'])}" \
             if r["skipped_with_local_changes"] else ""
-        return f"Fetched {r['fetched']} playlists from {r['service']}{skipped}."
+        failed = "; failed: " + "; ".join(f"{f['name']} ({f['error']})" for f in r["failed"]) if r["failed"] else ""
+        return f"Fetched {r['fetched']} of {r['total']} playlists ({r['items']} items) from {r['service']}{skipped}{failed}."
 
     def playlist_create(self, service: str, name: str, description: str = "", public: bool = False) -> str:
         r = self.api.playlist_create(service, name, description, public)

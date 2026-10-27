@@ -15,9 +15,10 @@ import base64
 import json
 import re
 import secrets
+import threading
 import time
 from typing import Literal, Optional
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -48,6 +49,10 @@ PROVIDERS = {
 }
 
 TRANSPORT: httpx.BaseTransport | None = None     # tests put a MockTransport here
+
+# fetches in progress, (user id, service) -> {running, done, total, name, items}; one server process
+_progress: dict[tuple[int, str], dict] = {}
+_progress_lock = threading.Lock()
 
 session_api = APIRouter(prefix="/api/playlists")
 
@@ -373,6 +378,21 @@ def _store_items(con, playlist_id: int, items: list[dict]) -> None:
           x.get("url") or "", x["added_at"]) for i, x in enumerate(items)])
 
 
+def progress(c: Ctx, service: str) -> dict:
+    """How far a running fetch of this account's playlists is, for the page's progress bar."""
+    with _progress_lock:
+        p = _progress.get((c.uid, service))
+        return dict(p) if p else {"running": False}
+
+
+def _set_progress(key, **fields) -> None:
+    with _progress_lock:
+        if fields.get("running") is False:
+            _progress.pop(key, None)
+        else:
+            _progress.setdefault(key, {"running": True, "done": 0, "total": 0, "name": "", "items": 0}).update(fields)
+
+
 def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = False) -> dict:
     """Fetch the playlists (or one) and their items. A playlist with pending local changes is left alone
     unless force=True, which discards them."""
@@ -380,8 +400,17 @@ def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = 
     acc = account(c, service)
     if not acc or not acc["access_token"]:
         raise err(409, f"not_connected: connect {service} first on the Playlists page")
+    key = (c.uid, service)
+    _set_progress(key, running=True, done=0, total=0, name="", items=0)
+    try:
+        return _pull(c, service, acc, key, playlist_id, force)
+    finally:
+        _set_progress(key, running=False)
+
+
+def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: bool) -> dict:
     con, t = c.con, db.now()
-    fetched, skipped = 0, []
+    fetched, skipped, failed, item_count = 0, [], [], 0
     with _api(c, service) as http:
         if playlist_id is not None:
             row = playlist(c, playlist_id)
@@ -404,14 +433,26 @@ def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = 
         else:
             wanted = _remote_playlists(http, service, acc)
         seen = set()
-        for p in wanted:
+        _set_progress(key, total=len(wanted))
+        for n, p in enumerate(wanted):
             seen.add(p["external_id"])
+            _set_progress(key, done=n, name=p["name"])
             row = con.execute("SELECT * FROM playlists WHERE user_id=? AND service=? AND external_id=?",
                               (c.uid, service, p["external_id"])).fetchone()
             if row and row["dirty"] and not force:
                 skipped.append(row["name"])
                 continue
-            items = _remote_items(http, service, p["external_id"])
+            try:
+                items = _remote_items(http, service, p["external_id"])
+            except ServiceError as e:
+                # one playlist the service will not give (deleted meanwhile, a block): note it and go on;
+                # a dead token or a disabled API fails every playlist, so that ends the fetch
+                if e.status == 401 or problem_code(c, e).startswith("youtube_api_disabled") or playlist_id is not None:
+                    raise
+                failed.append({"name": p["name"], "error": f"{e.status} {e.message}"[:200]})
+                continue
+            item_count += len(items)
+            _set_progress(key, items=item_count)
             for x in items:
                 x["url"] = item_url(service, x["item_id"])
             with db.tx(con):
@@ -434,7 +475,8 @@ def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = 
                 for r in con.execute("SELECT id, external_id FROM playlists WHERE user_id=? AND service=?", (c.uid, service)).fetchall():
                     con.execute("UPDATE playlists SET gone=? WHERE id=?", (int(r["external_id"] not in seen), r["id"]))
                 con.execute("UPDATE playlist_accounts SET synced_at=? WHERE id=?", (t, acc["id"]))
-    return {"service": service, "fetched": fetched, "skipped_with_local_changes": skipped}
+    return {"service": service, "total": len(wanted), "fetched": fetched, "items": item_count,
+            "skipped_with_local_changes": skipped, "failed": failed}
 
 
 # --- reading ---------------------------------------------------------------------------------------------
@@ -712,11 +754,27 @@ class Edit(BaseModel):
     ops: list[dict] = Field(min_length=1, max_length=200)
 
 
-def _service_errors(fn):
+_API_DISABLED = re.compile(r"(?:has not been used in project|is disabled|accessNotConfigured|SERVICE_DISABLED)", re.I)
+_PROJECT = re.compile(r"project (\d{6,})")
+
+
+def problem_code(c: Ctx, e: ServiceError) -> str:
+    """A code the page can explain. youtube_api_disabled:<project number> when Google answers that the YouTube Data
+    API is not enabled in the project of the user's client: the connection works but nothing can be fetched."""
+    if e.service == "youtube" and e.status == 403 and _API_DISABLED.search(e.message):
+        m = _PROJECT.search(e.message)
+        acc = account(c, "youtube")
+        project = m.group(1) if m else (acc["client_id"].split("-", 1)[0] if acc and "-" in acc["client_id"] else "")
+        return f"youtube_api_disabled:{project}"
+    return f"{e.service}_error: {e.status} {e.message}"
+
+
+def _service_errors(c: Ctx, fn):
     try:
         return fn()
     except ServiceError as e:
-        raise err(502, f"{e.service}_error: {e.status} {e.message}") from e
+        code = problem_code(c, e)
+        raise err(409 if code.startswith("youtube_api_disabled") else 502, code) from e
 
 
 @session_api.get("")
@@ -743,8 +801,13 @@ def web_callback(service: str, request: Request, code: str = "", state: str = ""
     try:
         finish_connect(c, service, code, state)
     except ServiceError as e:
-        return RedirectResponse(f"/#/playlists?error={clean_text(f'{e.status} {e.message}', 100)}", status_code=303)
-    return RedirectResponse(f"/#/playlists?connected={service}", status_code=303)
+        # the tokens are saved before the profile is read, so an API that is still disabled is a problem to
+        # explain on the page, not a failed connection
+        problem = problem_code(c, e)
+        if problem.startswith("youtube_api_disabled"):
+            return RedirectResponse(f"/#/playlists?connected={service}&problem={quote(problem)}", status_code=303)
+        return RedirectResponse(f"/#/playlists?error={quote(clean_text(f'{e.status} {e.message}', 100))}", status_code=303)
+    return RedirectResponse(f"/#/playlists?connected={service}&fetch=1", status_code=303)
 
 
 @session_api.delete("/accounts/{service}")
@@ -752,14 +815,19 @@ def web_disconnect(service: str, c: Ctx = Depends(ctx)):
     return disconnect(c, service)
 
 
+@session_api.get("/accounts/{service}/progress")
+def web_progress(service: str, c: Ctx = Depends(ctx)):
+    return progress(c, _service(service))
+
+
 @session_api.post("/accounts/{service}/sync")
 def web_sync(service: str, force: bool = False, c: Ctx = Depends(ctx)):
-    return _service_errors(lambda: pull(c, service, None, force))
+    return _service_errors(c, lambda: pull(c, service, None, force))
 
 
 @session_api.post("/accounts/{service}/create")
 def web_create(service: str, body: Create, c: Ctx = Depends(ctx)):
-    return _service_errors(lambda: create(c, service, body.name, body.description, body.public))
+    return _service_errors(c, lambda: create(c, service, body.name, body.description, body.public))
 
 
 @session_api.get("/lists/{playlist_id}")
@@ -769,22 +837,22 @@ def web_show(playlist_id: int, offset: int = 0, limit: int = 500, c: Ctx = Depen
 
 @session_api.post("/lists/{playlist_id}/edit")
 def web_edit(playlist_id: int, body: Edit, c: Ctx = Depends(ctx)):
-    return _service_errors(lambda: edit(c, playlist_id, body.ops))
+    return _service_errors(c, lambda: edit(c, playlist_id, body.ops))
 
 
 @session_api.post("/lists/{playlist_id}/discard")
 def web_discard(playlist_id: int, c: Ctx = Depends(ctx)):
-    return _service_errors(lambda: discard(c, playlist_id))
+    return _service_errors(c, lambda: discard(c, playlist_id))
 
 
 @session_api.post("/lists/{playlist_id}/push")
 def web_push(playlist_id: int, c: Ctx = Depends(ctx)):
-    return _service_errors(lambda: push(c, playlist_id))
+    return _service_errors(c, lambda: push(c, playlist_id))
 
 
 @session_api.post("/lists/{playlist_id}/sync")
 def web_sync_one(playlist_id: int, force: bool = False, c: Ctx = Depends(ctx)):
-    return _service_errors(lambda: pull(c, playlist(c, playlist_id)["service"], playlist_id, force))
+    return _service_errors(c, lambda: pull(c, playlist(c, playlist_id)["service"], playlist_id, force))
 
 
 @session_api.delete("/lists/{playlist_id}")

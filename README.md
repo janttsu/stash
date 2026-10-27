@@ -290,7 +290,10 @@ only the bookmarks made from it take part in previews, undo and the trash.
 the copy (add by link, remove, drag to reorder, rename; or ask the assistant: "move every live recording from
 Favourites to a new playlist Live") and the changes wait as *pending* until you press **Push**; only then does
 the service change. **Fetch playlists** brings the service's state in; a playlist with pending changes is left
-alone until they are pushed or discarded. A playlist deleted on the service stays in Stash marked *gone*, and
+alone until they are pushed or discarded. Right after connecting, the first fetch starts by itself. A fetch
+shows a progress bar (playlist *n* of *m*, its name, items so far) and ends with a summary: how many playlists
+of how many were fetched, how many items, which were left alone and which failed and why; a playlist the
+service refuses does not stop the others. A playlist deleted on the service stays in Stash marked *gone*, and
 **Export all** downloads everything as JSON, so the copy doubles as a backup.
 
 Each account connects its own developer app for each service (Stash never ships one): Playlists → **Connect…**
@@ -301,9 +304,10 @@ are stored in the database as they are.
 
 For YouTube, everything happens in one Google Cloud project:
 
-1. Enable **YouTube Data API v3** (APIs & Services → Library). If it is missing, connecting works but fetching
-   fails with "YouTube Data API v3 has not been used in project … or it is disabled": enable it in the project
-   the client belongs to, wait a minute, and fetch again (no new connection is needed).
+1. Enable **YouTube Data API v3** (APIs & Services → Library). If it is missing, connecting works but Google
+   refuses every fetch ("YouTube Data API v3 has not been used in project … or it is disabled"). Stash then
+   shows a notice with a link to that API page in the client's own project: enable it there, wait a minute,
+   and press *Fetch playlists* (no new connection is needed).
 2. Set up the consent screen (Google Auth Platform → Get started; External). Google allows creating a client
    only after this.
 3. Add the Google account you sign in to YouTube with under Audience → **Test users**, and leave the app in

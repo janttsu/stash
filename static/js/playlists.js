@@ -4,7 +4,8 @@ import { api, attempt, confirmBox, copyText, fill, fmtDate, h, openModal, safeHr
 import { t } from './i18n.js';
 
 let root = null;
-const view = { playlist: null };
+// problem: a youtube_api_disabled:<project> code to explain; progress: a running fetch; result: the last one's
+const view = { playlist: null, problem: '', progress: null, result: null };
 
 export async function renderPlaylists(container, params = {}) {
   root = container;
@@ -12,8 +13,98 @@ export async function renderPlaylists(container, params = {}) {
   if (params.playlist) view.playlist = Number(params.playlist);
   if (params.connected) toast(t('{service} connected', { service: serviceName(params.connected) }));
   if (params.error) toast(t('Connecting failed: {error}', { error: params.error }), 'error');
-  if (params.connected || params.error) history.replaceState(null, '', '#/playlists');
+  if (params.problem) view.problem = params.problem;
+  if (params.connected || params.error || params.problem) history.replaceState(null, '', '#/playlists');
   await draw();
+  // right after connecting, the first fetch starts by itself
+  if (params.fetch && params.connected) await fetchAll(params.connected);
+}
+
+/** Fetch every playlist of a service, with a progress bar while it runs and a summary when it is done. */
+async function fetchAll(service) {
+  if (view.progress) return;
+  view.problem = '';
+  view.result = null;
+  view.progress = { service, done: 0, total: 0, name: '', items: 0 };
+  await draw();
+  let polling = true;
+  const poll = async () => {
+    while (polling) {
+      await new Promise((r) => setTimeout(r, 700));
+      if (!polling) break;
+      try {
+        const p = await api('GET', `/api/playlists/accounts/${service}/progress`);
+        if (p.running && polling) { view.progress = { service, ...p }; drawProgress(); }
+      } catch { /* the fetch itself reports errors */ }
+    }
+  };
+  poll();
+  try {
+    const r = await api('POST', `/api/playlists/accounts/${service}/sync`);
+    view.result = { service, ...r };
+  } catch (e) {
+    if (String(e.code).startsWith('youtube_api_disabled')) view.problem = e.code;
+    else view.result = { service, error: e.message };
+  } finally {
+    polling = false;
+    view.progress = null;
+  }
+  await draw();
+}
+
+function progressBox() {
+  const p = view.progress;
+  const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+  return h('div', { class: 'pl__progress', id: 'pl-progress', role: 'status' },
+    h('div', { class: 'row' },
+      h('b', null, t('Fetching playlists from {service}…', { service: serviceName(p.service) })),
+      h('span', { class: 'muted small grow' }, p.total
+        ? t('{done} of {total} playlists · {items} items', { done: p.done, total: p.total, items: p.items })
+        : t('Listing playlists…'))),
+    h('progress', { max: p.total || 1, value: p.total ? p.done : undefined, 'aria-label': `${pct}%` }),
+    p.name ? h('div', { class: 'muted small' }, p.name) : null);
+}
+
+function drawProgress() {
+  const el = document.getElementById('pl-progress');
+  if (el && view.progress) el.replaceWith(progressBox());
+}
+
+function resultBox() {
+  const r = view.result;
+  const close = h('button', { type: 'button', class: 'btn small', onclick: () => { view.result = null; draw(); } }, t('Close'));
+  if (r.error) {
+    return h('div', { class: 'pl__result pl__result--bad', role: 'status' },
+      h('div', { class: 'row' }, h('b', { class: 'grow' }, t('Fetching from {service} failed', { service: serviceName(r.service) })), close),
+      h('div', { class: 'small' }, r.error));
+  }
+  const ok = r.failed.length === 0;
+  return h('div', { class: `pl__result ${ok ? 'pl__result--ok' : 'pl__result--bad'}`, role: 'status' },
+    h('div', { class: 'row' },
+      h('b', { class: 'grow' }, t('{fetched} of {total} playlists fetched from {service} ({items} items)',
+        { fetched: r.fetched, total: r.total, service: serviceName(r.service), items: r.items })),
+      close),
+    r.skipped_with_local_changes.length ? h('div', { class: 'small' },
+      t('Left alone because of pending changes: {names}', { names: r.skipped_with_local_changes.join(', ') })) : null,
+    r.failed.length ? [
+      h('div', { class: 'small' }, t('{n} failed:', { n: r.failed.length })),
+      h('ul', { class: 'small' }, r.failed.map((f) => h('li', null, `${f.name}: ${f.error}`))),
+    ] : null);
+}
+
+/** Google answered that the YouTube Data API is not enabled in the project of the user's client. */
+function problemBox() {
+  const project = view.problem.split(':')[1] || '';
+  const link = `https://console.cloud.google.com/apis/library/youtube.googleapis.com${project ? `?project=${project}` : ''}`;
+  return h('div', { class: 'pl__result pl__result--bad', role: 'alert' },
+    h('b', null, t('YouTube is connected, but the YouTube Data API is not enabled')),
+    h('p', { class: 'small' }, t('Google allows the connection but refuses to give playlists until the YouTube Data API v3 is enabled in the same Google Cloud project as your client{project}.',
+      { project: project ? ` (${project})` : '' })),
+    h('ol', { class: 'small' },
+      h('li', null, t('Open the API page and press “Enable”:'), ' ', h('a', { href: link, target: '_blank', rel: 'noopener noreferrer' }, t('YouTube Data API v3 in your project'))),
+      h('li', null, t('Wait a minute: Google takes a moment to pass the change on.')),
+      h('li', null, t('Press “Fetch playlists” below. There is no need to connect again.'))),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onclick: () => fetchAll('youtube') }, t('Fetch playlists'))));
 }
 
 const serviceName = (s) => ({ spotify: 'Spotify', youtube: 'YouTube' })[s] || s;
@@ -35,12 +126,7 @@ async function draw() {
       h('span', { class: 'muted small grow' }, a.connected
         ? [t('Connected as {name}', { name: a.display_name || '…' }), a.synced_at && t('synced {date}', { date: fmtDate(a.synced_at) })].filter(Boolean).join(' · ')
         : t('Not connected')),
-      a.connected && h('button', { type: 'button', class: 'btn', onclick: () => act(async () => {
-        const r = await api('POST', `/api/playlists/accounts/${a.service}/sync`);
-        toast(r.skipped_with_local_changes.length
-          ? t('{n} playlists fetched; left alone because of pending changes: {names}', { n: r.fetched, names: r.skipped_with_local_changes.join(', ') })
-          : t('{n} playlists fetched', { n: r.fetched }));
-      }) }, t('Fetch playlists')),
+      a.connected && h('button', { type: 'button', class: 'btn', disabled: Boolean(view.progress), onclick: () => fetchAll(a.service) }, t('Fetch playlists')),
       a.connected && h('button', { type: 'button', class: 'btn', onclick: () => createDialog(a.service) }, t('New playlist…')),
       h('button', { type: 'button', class: 'btn', onclick: () => connectDialog(a) }, a.connected ? t('Connect again…') : t('Connect…')),
       a.connected && h('button', { type: 'button', class: 'btn danger-quiet', onclick: () => act(async () => {
@@ -63,6 +149,9 @@ async function draw() {
       h('a', { class: 'btn', href: '/api/playlists/export', download: '' }, t('Export all (JSON)'))),
     h('p', { class: 'muted' }, t('Your Spotify and YouTube playlists, copied into Stash. Edit them here or ask your assistant (“move every live track to a new playlist”); the changes wait as pending until you push them to the service. The copy is also your backup: it stays even when a playlist disappears from the service.')),
     h('div', { class: 'pl__accounts' }, data.accounts.map(accountCard)),
+    view.progress ? progressBox() : null,
+    view.problem ? problemBox() : null,
+    view.result && !view.progress ? resultBox() : null,
     h('div', { class: 'pl__columns' },
       h('div', { class: 'pl__lists' }, data.playlists.length ? data.playlists.map(listRow) : h('p', { class: 'empty' }, t('No playlists fetched yet. Connect a service and press “Fetch playlists”.'))),
       detail && playlistDetail(detail))));
