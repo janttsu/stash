@@ -73,7 +73,11 @@ function progressBox() {
         : p.total ? t('{done} of {total} playlists · {items} items', { done: p.done, total: p.total, items: p.items })
           : t('Listing playlists…'))),
     h('progress', { max: p.total || 1, value: p.total ? p.done : undefined, 'aria-label': `${pct}%` }),
-    p.name ? h('div', { class: 'muted small' }, p.name) : null);
+    p.name ? h('div', { class: 'row pl__progress-list' },
+      h('span', { class: 'small grow' }, p.name),
+      !pushing && p.list_total ? h('span', { class: 'muted small' },
+        t('{read} of {total} videos from this list', { read: p.list_read || 0, total: p.list_total })) : null) : null,
+    p.name && !pushing && p.list_total ? h('progress', { class: 'pl__progress-sub', max: p.list_total, value: p.list_read || 0 }) : null);
 }
 
 function drawProgress() {

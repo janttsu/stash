@@ -128,6 +128,7 @@ export const SV = {
   "Fetching playlists from {service}…": "Hämtar spellistor från {service}…",
   "{done} of {total} playlists · {items} items": "{done} av {total} spellistor · {items} spår",
   "Listing playlists…": "Listar spellistor…",
+  "{read} of {total} videos from this list": "{read} av {total} videor från den här listan",
   "Fetching from {service} failed": "Hämtningen från {service} misslyckades",
   "{fetched} of {total} playlists fetched from {service} ({items} items)": "{fetched} av {total} spellistor hämtade från {service} ({items} spår)",
   "Left alone because of pending changes: {names}": "Lämnade ifred på grund av väntande ändringar: {names}",

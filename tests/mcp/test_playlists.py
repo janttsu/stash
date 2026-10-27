@@ -23,6 +23,7 @@ class Fake:
         self.next_item = 0
         self.api_disabled = False      # Google's answer while the YouTube Data API is off in the client's project
         self.broken = set()            # playlist ids whose items the service refuses
+        self.timeouts: dict[str, int] = {}   # path -> how many more GETs of it time out
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         u = urlsplit(str(request.url))
@@ -72,6 +73,9 @@ class Fake:
         if self.api_disabled:
             return httpx.Response(403, json={"error": {"code": 403, "message": "YouTube Data API v3 has not been used in "
                                                        "project 123456789012 before or it is disabled. Enable it by visiting …"}})
+        if request.method == "GET" and self.timeouts.get(path, 0) > 0:
+            self.timeouts[path] -= 1
+            raise httpx.ReadTimeout("The read operation timed out", request=request)
         if path == "/playlistItems" and request.method == "GET" and q.get("playlistId") in self.broken:
             return httpx.Response(404, json={"error": {"message": "playlistNotFound"}})
         if path == "/channels":
@@ -318,9 +322,15 @@ def test_fetch_summary_and_progress(api, stash, fake):
     seen = []
     real = pl._remote_items
 
-    def watching(http, service, external_id):
+    def watching(http, service, external_id, on_page=None):
         seen.append(web.get("/api/playlists/accounts/youtube/progress").json())
-        return real(http, service, external_id)
+
+        def page(read, total):
+            on_page(read, total)
+            pages.append(web.get("/api/playlists/accounts/youtube/progress").json())
+        return real(http, service, external_id, page)
+
+    pages = []
 
     pl._remote_items = watching
     try:
@@ -329,6 +339,8 @@ def test_fetch_summary_and_progress(api, stash, fake):
         pl._remote_items = real
     assert seen[0]["running"] and seen[0]["total"] == 2 and seen[0]["done"] == 0 and seen[0]["name"] == "Live"
     assert seen[1]["done"] == 1 and seen[1]["items"] == 3 and seen[1]["name"] == "Broken"
+    assert seen[0]["list_read"] == 0 and seen[0]["list_total"] == 3, "a playlist starts at 0 of its size"
+    assert pages[0]["list_read"] == 3 and pages[0]["list_total"] == 3 and pages[0]["items"] == 3, "videos read so far"
     assert stash["raw"].get("/api/playlists/accounts/youtube/progress").status_code == 401
 
 
@@ -362,3 +374,24 @@ def test_synchronise_both_ways(api, stash, fake):
     reader = Client(stash["raw"], new_key(stash, can_write=False)["key"])
     err, text = reader.call("playlists_sync", service="spotify", push_pending=True)
     assert err and "read_only_key" in text
+
+
+def test_timeouts_are_retried_then_reported(api, stash, fake, monkeypatch):
+    """YouTube sometimes does not answer in time (seen in production on /videos). A GET is tried again; if it
+    keeps failing, that playlist is reported in the summary and the fetch goes on instead of a server error."""
+    monkeypatch.setattr(playlists, "RETRY_PAUSE", 0)
+    web = stash["web"]
+    connect(stash, "youtube")
+    fake.timeouts["/videos"] = 2      # two timeouts, the third try answers
+    r = web.post("/api/playlists/accounts/youtube/sync").json()
+    assert r["fetched"] == 1 and r["failed"] == [] and r["items"] == 3, "retried until it answered"
+    fake.youtube["PL2"] = {"title": "Second", "description": "", "privacy": "private", "items": [("y", "vidvidvid08")]}
+    fake.timeouts["/videos"] = 3      # the first playlist's durations never come
+    r = web.post("/api/playlists/accounts/youtube/sync")
+    assert r.status_code == 200, r.text
+    r = r.json()
+    assert r["total"] == 2 and r["fetched"] == 1
+    assert r["failed"] == [{"name": "Live", "error": "504 the service timed out (ReadTimeout)"}]
+    fake.timeouts["/playlists"] = 3   # the list of playlists itself: a clear error, not a 500
+    r = web.post("/api/playlists/accounts/youtube/sync")
+    assert r.status_code == 502 and r.json()["detail"] == "youtube_error: 504 the service timed out (ReadTimeout)"

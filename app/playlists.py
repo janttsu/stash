@@ -65,8 +65,34 @@ class ServiceError(RuntimeError):
 
 # --- HTTP to the services -----------------------------------------------------------------------------
 
-def _http(headers: dict | None = None) -> httpx.Client:
-    return httpx.Client(timeout=httpx.Timeout(20, connect=10), headers=headers or {}, transport=TRANSPORT)
+GET_TRIES = 3          # a read that times out or loses its connection is tried this many times in all
+RETRY_PAUSE = 2.0      # seconds before the second try, doubled before the third
+
+
+class _Client(httpx.Client):
+    """httpx.Client for one service: GETs are retried after a timeout or a dropped connection, and a network
+    failure that remains becomes a ServiceError, so a fetch notes it for that playlist and goes on instead of
+    ending in a server error. Writes are not retried: they may have reached the service."""
+
+    def __init__(self, service: str, **kwargs):
+        super().__init__(**kwargs)
+        self.service = service
+
+    def send(self, request: httpx.Request, **kwargs) -> httpx.Response:
+        tries = GET_TRIES if request.method == "GET" else 1
+        for attempt in range(tries):
+            try:
+                return super().send(request, **kwargs)
+            except httpx.TransportError as e:
+                if attempt + 1 >= tries:
+                    kind = "timed out" if isinstance(e, httpx.TimeoutException) else "could not be reached"
+                    raise ServiceError(self.service, 504, f"the service {kind} ({type(e).__name__})") from e
+                time.sleep(RETRY_PAUSE * (2 ** attempt))
+        raise AssertionError("unreachable")
+
+
+def _http(service: str, headers: dict | None = None) -> httpx.Client:
+    return _Client(service, timeout=httpx.Timeout(30, connect=10), headers=headers or {}, transport=TRANSPORT)
 
 
 def _check(service: str, r: httpx.Response) -> dict:
@@ -128,7 +154,7 @@ def _token_request(service: str, acc, data: dict) -> dict:
         headers["Authorization"] = f"Basic {basic}"
     else:
         form |= {"client_id": acc["client_id"], "client_secret": acc["client_secret"]}
-    with _http(headers) as http:
+    with _http(service, headers) as http:
         return _check(service, http.post(p["token"], data=form))
 
 
@@ -173,7 +199,7 @@ def _access_token(c: Ctx, service: str) -> str:
 
 
 def _api(c: Ctx, service: str) -> httpx.Client:
-    return _http({"Authorization": f"Bearer {_access_token(c, service)}", "Accept": "application/json"})
+    return _http(service, {"Authorization": f"Bearer {_access_token(c, service)}", "Accept": "application/json"})
 
 
 def _profile(c: Ctx, service: str) -> dict:
@@ -323,21 +349,27 @@ def _remote_playlists(http: httpx.Client, service: str, acc) -> list[dict]:
     return out
 
 
-def _remote_items(http: httpx.Client, service: str, external_id: str) -> list[dict]:
+def _remote_items(http: httpx.Client, service: str, external_id: str, on_page=None) -> list[dict]:
+    """The items of one playlist, page by page. on_page(read, total) is called after every page, for the
+    progress bar: how many items of this playlist have been read, of how many the service says it has."""
     api = PROVIDERS[service]["api"]
     out: list[dict] = []
+    read = 0
     if service == "spotify":
-        url, params = f"{api}/playlists/{external_id}/tracks", {"limit": 100, "fields": "next,items(added_at,track(id,name,duration_ms,artists(name),is_local))"}
+        url, params = f"{api}/playlists/{external_id}/tracks", {"limit": 100, "fields": "next,total,items(added_at,track(id,name,duration_ms,artists(name),is_local))"}
         while url and len(out) < MAX_ITEMS:
             data = _check(service, http.get(url, params=params))
             params = None
             for it in data.get("items", []):
+                read += 1
                 t = it.get("track") or {}
                 if not t.get("id"):
                     continue   # local files and unavailable tracks cannot be written back
                 out.append({"item_id": t["id"], "remote_id": "", "title": t.get("name", ""),
                             "artist": ", ".join(a["name"] for a in t.get("artists", [])),
                             "duration_ms": t.get("duration_ms", 0), "added_at": _iso_time(it.get("added_at"))})
+            if on_page:
+                on_page(read, data.get("total"))
             url = data.get("next")
         return out
     token = None
@@ -347,10 +379,13 @@ def _remote_items(http: httpx.Client, service: str, external_id: str) -> list[di
             params["pageToken"] = token
         data = _check(service, http.get(f"{api}/playlistItems", params=params))
         for it in data.get("items", []):
+            read += 1
             sn = it["snippet"]
             out.append({"item_id": sn.get("resourceId", {}).get("videoId", ""), "remote_id": it["id"],
                         "title": sn.get("title", ""), "artist": sn.get("videoOwnerChannelTitle", ""),
                         "duration_ms": 0, "added_at": _iso_time(sn.get("publishedAt"))})
+        if on_page:
+            on_page(read, data.get("pageInfo", {}).get("totalResults"))
         token = data.get("nextPageToken")
         if not token:
             break
@@ -393,8 +428,9 @@ def _set_progress(key, **fields) -> None:
         if fields.get("running") is False:
             _progress.pop(key, None)
         else:
+            # done/total: playlists; list_read/list_total: items of the playlist being read; items: all so far
             _progress.setdefault(key, {"running": True, "phase": "fetch", "done": 0, "total": 0, "name": "",
-                                       "items": 0}).update(fields)
+                                       "items": 0, "list_read": 0, "list_total": 0}).update(fields)
 
 
 def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = False, *, track: bool = True) -> dict:
@@ -442,14 +478,18 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
         _set_progress(key, total=len(wanted))
         for n, p in enumerate(wanted):
             seen.add(p["external_id"])
-            _set_progress(key, done=n, name=p["name"])
+            _set_progress(key, done=n, name=p["name"], list_read=0, list_total=int(p.get("remote_count") or 0))
             row = con.execute("SELECT * FROM playlists WHERE user_id=? AND service=? AND external_id=?",
                               (c.uid, service, p["external_id"])).fetchone()
             if row and row["dirty"] and not force:
                 skipped.append(row["name"])
                 continue
+
+            def on_page(read, total, before=item_count, fallback=int(p.get("remote_count") or 0)):
+                _set_progress(key, list_read=read, list_total=max(int(total or fallback), read), items=before + read)
+
             try:
-                items = _remote_items(http, service, p["external_id"])
+                items = _remote_items(http, service, p["external_id"], on_page)
             except ServiceError as e:
                 # one playlist the service will not give (deleted meanwhile, a block): note it and go on;
                 # a dead token or a disabled API fails every playlist, so that ends the fetch

@@ -139,6 +139,7 @@ export const FI = {
   'Fetching playlists from {service}…': 'Haetaan soittolistoja palvelusta {service}…',
   '{done} of {total} playlists · {items} items': '{done} / {total} soittolistaa · {items} kappaletta',
   'Listing playlists…': 'Luetellaan soittolistoja…',
+  '{read} of {total} videos from this list': '{read} / {total} videota tältä listalta',
   'Fetching from {service} failed': 'Haku palvelusta {service} epäonnistui',
   '{fetched} of {total} playlists fetched from {service} ({items} items)': '{fetched} / {total} soittolistaa haettu palvelusta {service} ({items} kappaletta)',
   'Left alone because of pending changes: {names}': 'Jätetty rauhaan odottavien muutosten takia: {names}',
