@@ -113,7 +113,9 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   scope gained `user-follow-read user-follow-modify`; older connections get `reconnect_needed:spotify`.
   YouTube has no API for playlists saved from others, so those are `state='local'` entries, never pushed.
   To check on first real use: the subscriptions list order/paging on a large account, and the quota of
-  the activity check (1 unit per channel). Since 2026-10-27 `media-sync` also runs the activity check in the
+  the activity check (1 unit per channel). The page groups the list by tag by default (`grouped()` in
+  `subscriptions.js`, one `<details>` per tag, open state and the chosen view remembered in localStorage,
+  2026-10-27): tags are the categories, one topic tag per channel is the intended use. Since 2026-10-27 `media-sync` also runs the activity check in the
   background (`jobs._stale_activity`: channels not checked for `ACTIVITY_EVERY`, at most `ACTIVITY_BATCH`=200
   per account per run, oldest first; `tests/mcp/test_subscriptions.py::test_scheduled_activity_check`).
 - **Handovers** (`app/handover.py`, `static/js/handover.js` as a card on the AI page): done, tests in

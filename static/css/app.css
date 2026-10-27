@@ -326,6 +326,11 @@ img.fav { background: var(--fav-plate, transparent); }
 .sub__text { flex: 1; min-width: 0; }
 .sub__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .sub__meta { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 4px; }
+.sub__groups { display: flex; flex-direction: column; gap: 6px; }
+.sub__group { border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; background: var(--surface); }
+.sub__group > summary { cursor: pointer; padding: 8px 0; list-style: none; }
+.sub__group > summary::before { content: '▸'; display: inline-block; width: 14px; color: var(--muted); }
+.sub__group[open] > summary::before { content: '▾'; }
 .sub__badge { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
 .sub__badge--added { color: var(--accent); font-weight: 600; }
 .sub__badge--removed { color: #c62828; font-weight: 600; }

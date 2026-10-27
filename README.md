@@ -410,6 +410,9 @@ subscriptions; for Spotify the artists you follow and the playlists you follow (
 
 - **Fetch** copies them into Stash, which is also a backup (**Export all** downloads them as JSON). A
   subscription that disappears from the service stays, marked *gone*, with its tags and notes.
+- **Grouped by tag** (the default once any tag exists) shows the list as one section per tag, each opened or
+  closed as you last left it, untagged entries last: give every channel a topic tag and a long list becomes
+  findable again. *One list* is the flat view; picking a tag in the filter shows that tag alone.
 - **Tags and notes** are Stash's own: tag channels by topic, filter and sort by them, write why you follow
   something. They never leave Stash.
 - **Unsubscribe** and **Add by link…** (a channel `…/@name` or `…/channel/UC…`, a Spotify artist or playlist)

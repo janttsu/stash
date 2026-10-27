@@ -7,10 +7,18 @@ import { pauseBox } from './playlists.js';
 
 let root = null;
 const view = {
-  service: 'youtube', kind: '', q: '', tag: '', state: '', inactive: 0, sort: 'title',
+  service: 'youtube', kind: '', q: '', tag: '', state: '', inactive: 0, sort: 'title', group: remembered('group', 'tag'),
   progress: null, result: null, problem: '',
 };
 const SERVICES = { youtube: 'YouTube', spotify: 'Spotify' };
+
+/** A per-browser convenience (the chosen view), kept in localStorage when it is available. */
+function remembered(key, fallback) {
+  try { return localStorage.getItem(`stash.subscriptions.${key}`) ?? fallback; } catch { return fallback; }
+}
+function remember(key, value) {
+  try { localStorage.setItem(`stash.subscriptions.${key}`, value); } catch { /* private window or storage off */ }
+}
 const KIND = () => ({ channel: t('Channel'), artist: t('Artist'), playlist: t('Playlist') });
 
 export async function renderSubscriptions(container, params = {}) {
@@ -177,6 +185,7 @@ async function draw() {
       [365, t('No upload in a year')], [730, t('No upload in 2 years')]], Number) : null,
     sel('sort', [['title', t('By name')], ['subscribed', t('Newest subscriptions first')], ...(view.service === 'youtube'
       ? [['activity', t('Quietest first')]] : []), ['size', t('Largest first')]]),
+    Object.keys(data.tags).length ? sel('group', [['tag', t('Grouped by tag')], ['', t('One list')]], (v) => { remember('group', v); return v; }) : null,
     h('input', {
       type: 'search', class: 'input grow', value: view.q, placeholder: t('Search'),
       oninput: (e) => { view.q = e.target.value; clearTimeout(view.timer); view.timer = setTimeout(draw, 300); },
@@ -244,8 +253,29 @@ async function draw() {
         h('button', { type: 'button', class: 'btn', onclick: () => chosen().length && tagDialog(chosen(), []) }, t('Tag selected…')),
         h('button', { type: 'button', class: 'btn danger-quiet', onclick: () => chosen().length && act(() => edit([{ op: 'unsubscribe', ids: chosen() }])) },
           t('Unsubscribe selected'))),
-      h('ul', { class: 'plain tabs__items' }, list.items.map(row)),
+      view.group === 'tag' && Object.keys(data.tags).length && !view.tag ? grouped(list.items, row) : h('ul', { class: 'plain tabs__items' }, list.items.map(row)),
     ] : h('p', { class: 'empty' }, acc.connected ? t('Nothing here yet. Press “Fetch” to copy your subscriptions into Stash.') : '')));
+}
+
+/** The tags as sections, each closed or open as the viewer last left it; an item with several tags is under each
+ * of them, and the untagged ones come last. This is how a long list of channels is found again. */
+function grouped(items, row) {
+  const groups = new Map();
+  for (const x of items) {
+    for (const tag of x.tags.length ? x.tags : ['']) {
+      if (!groups.has(tag)) groups.set(tag, []);
+      groups.get(tag).push(x);
+    }
+  }
+  const keys = [...groups.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  if (groups.has('')) keys.push('');
+  return h('div', { class: 'sub__groups' }, keys.map((tag) => {
+    const name = tag || t('No tag');
+    const open = remembered(`open:${tag}`, '1') === '1';
+    return h('details', { class: 'sub__group', open, ontoggle: (e) => remember(`open:${tag}`, e.target.open ? '1' : '0') },
+      h('summary', null, h('b', null, name), ' ', h('span', { class: 'muted small' }, `(${groups.get(tag).length})`)),
+      h('ul', { class: 'plain tabs__items' }, groups.get(tag).map(row)));
+  }));
 }
 
 async function addDialog() {
