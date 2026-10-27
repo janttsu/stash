@@ -113,7 +113,8 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   which saves quota when they overlap. YouTube writes cost 50 units each (`YOUTUBE_WRITE_COST`), so `push()`
   of a YouTube list refuses more than `YOUTUBE_PUSH_MAX` writes unless given a `budget`; with one it runs
   `_push_youtube_batch` (rename, removals, additions appended in order, each recorded at once, no reordering,
-  fetch back when complete). `push_batch(c, budget)` is what the daily `youtube-push` job runs
+  fetch back when complete; a 4xx for one video drops it and reports it, a 5xx ends the batch with the video
+  still pending: the first real run met a passing 503 from YouTube). `push_batch(c, budget)` is what the daily `youtube-push` job runs
   (`jobs.youtube_push`, `PUSH_BATCH`=160, `scripts/systemd/stash-youtube-push.*` at 10:30): dirty playlists
   first, then the deletions of marked playlists once nothing is pending. A *quotaExceeded* 403 from YouTube is
   turned into the rate-limit pause until the next reset (`youtube_quota_reset`, midnight Pacific time).

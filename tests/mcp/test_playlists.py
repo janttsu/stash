@@ -28,6 +28,8 @@ class Fake:
         self.renamed: dict[str, str] = {}   # YouTube video id -> its new title (the playlist item still shows the old)
         self.deleted: set[str] = set()      # YouTube video ids deleted or made private
         self.quota_left: int | None = None  # YouTube writes left before the day's quota is spent (None: no limit)
+        self.flaky = 0                      # how many more YouTube writes answer 503
+        self.refuse: set[str] = set()       # video ids YouTube will not add to a playlist (404 videoNotFound)
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         u = urlsplit(str(request.url))
@@ -98,6 +100,9 @@ class Fake:
         if request.method == "GET" and self.timeouts.get(path, 0) > 0:
             self.timeouts[path] -= 1
             raise httpx.ReadTimeout("The read operation timed out", request=request)
+        if request.method != "GET" and self.flaky > 0:
+            self.flaky -= 1
+            return httpx.Response(503, json={"error": {"code": 503, "message": "The service is currently unavailable."}})
         if request.method != "GET" and self.quota_left is not None:
             if self.quota_left <= 0:
                 return httpx.Response(403, json={"error": {"code": 403, "message": "The request cannot be completed because "
@@ -142,6 +147,9 @@ class Fake:
             sn = body["snippet"]
             p = self.youtube[sn["playlistId"]]
             if request.method == "POST":
+                if sn["resourceId"]["videoId"] in self.refuse:
+                    return httpx.Response(404, json={"error": {"code": 404, "message": "Video not found.",
+                                                               "errors": [{"reason": "videoNotFound"}]}})
                 self.next_item += 1
                 rid = f"item-new{self.next_item}"
                 p["items"].insert(sn.get("position", len(p["items"])), (rid, sn["resourceId"]["videoId"]))
@@ -356,11 +364,21 @@ def test_publish_in_daily_batches_within_quota(api, stash, fake, monkeypatch):
     r = jobs.youtube_push()
     assert r["ok"] and "4 writes" in r["summary"] and "2 items still pending" in r["summary"], r
     assert videos("PL2") == ["vidvidvid04", "vidvidvid05", "vidvidvid06", "vidvidvid07"] and by_name()["Mix"]["pending"] == 2
+    # a passing failure ends the batch, the video stays pending and nothing is dropped
+    fake.flaky = 1
+    r = jobs.youtube_push()
+    assert not r["ok"] and "503" in r["summary"] and by_name()["Mix"]["pending"] == 2 and by_name()["Mix"]["count"] == 6, r
+    # a video YouTube refuses is dropped and reported
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 1)
+    fake.refuse = {"vidvidvid08"}
+    r = jobs.youtube_push()
+    assert r["ok"] and "refused by YouTube: 1" in r["summary"] and by_name()["Mix"]["pending"] == 1 and by_name()["Mix"]["count"] == 5, r
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 4)
     # the quota runs out mid-batch: the pause is recorded until YouTube's reset and nothing more is sent
-    fake.quota_left = 1
+    fake.quota_left = 0
     r = jobs.youtube_push()
     assert r["ok"] and "rate_limited" in r["summary"], r
-    assert videos("PL2")[-1] == "vidvidvid08" and by_name()["Mix"]["pending"] == 1, "the write before the limit was kept"
+    assert videos("PL2")[-1] == "vidvidvid07" and by_name()["Mix"]["pending"] == 1, "the last video waits for the reset"
     con = db.connect()
     until = int(db.get_config(con, "rate_block:youtube:cid", "0") or 0)
     assert until > time.time() + 60, "paused until the reset"
@@ -372,7 +390,7 @@ def test_publish_in_daily_batches_within_quota(api, stash, fake, monkeypatch):
     r = jobs.youtube_push()
     assert "1 playlists complete" in r["summary"] and "0 items still pending" in r["summary"], r
     mix = by_name()["Mix"]
-    assert not mix["dirty"] and mix["count"] == 6 and mix["pending"] == 0 and videos("PL2") == [f"vidvidvid{n:02d}" for n in range(4, 10)]
+    assert not mix["dirty"] and mix["count"] == 5 and mix["pending"] == 0 and videos("PL2") == [f"vidvidvid{n:02d}" for n in (4, 5, 6, 7, 9)]
     # adopting: the old "Live" becomes the Stash-only "Keep" with a diff instead of a fresh playlist
     web.post("/api/playlists/takeout", json={"files": [{"name": "Keep-videos.csv", "text":
              "Video ID,Playlist Video Creation Timestamp\nvidvidvid02,2026-01-01T00:00:00+00:00\nvidvidvid09,2026-01-01T00:00:00+00:00\n"}]})

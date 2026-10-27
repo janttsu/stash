@@ -975,8 +975,9 @@ def _push_youtube_batch(c: Ctx, row, items, budget: int, track: bool) -> dict:
     """Part of a YouTube push: up to `budget` writes, each recorded in Stash as soon as it is done, so that a
     run cut short (the quota, a failure) loses nothing. First the rename, then the removals, then the
     additions in order, each at the end of the playlist: the order on YouTube is the order of addition, and the
-    reordering a full push does is left out. A video YouTube refuses (deleted, private) is dropped from the
-    list and reported. When nothing is left pending, the playlist is fetched back."""
+    reordering a full push does is left out. A video YouTube refuses (deleted, private: a 4xx for that video)
+    is dropped from the list and reported; a passing failure (5xx) ends the batch with the video still pending.
+    When nothing is left pending, the playlist is fetched back."""
     api, con, pid = PROVIDERS["youtube"]["api"], c.con, row["id"]
     done, failed = {"added": 0, "removed": 0, "calls": 0}, []
     with _api(c, "youtube") as http:
@@ -1008,7 +1009,9 @@ def _push_youtube_batch(c: Ctx, row, items, budget: int, track: bool) -> dict:
                     "snippet": {"playlistId": row["external_id"],
                                 "resourceId": {"kind": "youtube#video", "videoId": r["item_id"]}}}))
             except ServiceError as e:
-                if e.status in (401, 429) or problem_code(c, e).startswith("youtube_api_disabled"):
+                # only YouTube's own refusal of the video (not found, private, forbidden) drops it; a dead token,
+                # the quota, a disabled API or a passing 5xx ends the batch and the video stays pending
+                if e.status >= 500 or e.status in (401, 429) or problem_code(c, e).startswith("youtube_api_disabled"):
                     raise
                 done["calls"] += 1
                 failed.append({"title": r["title"], "error": f"{e.status} {e.message}"[:200]})
