@@ -340,10 +340,13 @@ def build_server(origin: str) -> FastMCP:
         return await run(ctx, "playlist_discard", playlist_id)
 
     @mcp.tool()
-    async def playlists_sync(ctx: Context, service: Literal["spotify", "youtube"], force: bool = False) -> str:
+    async def playlists_sync(ctx: Context, service: Literal["spotify", "youtube"], force: bool = False,
+                             push_pending: Annotated[bool, Field(description="first push every playlist's pending "
+                                                                             "changes to the service: only when the "
+                                                                             "user agreed to push them")] = False) -> str:
         """Fetch every playlist of a service into Stash. Playlists with pending changes are left alone unless
-        force=true, which drops those changes."""
-        return await run(ctx, "playlists_sync", service, force)
+        force=true, which drops those changes, or push_pending=true, which pushes them first (a two-way sync)."""
+        return await run(ctx, "playlists_sync", service, force, push_pending)
 
     @mcp.tool()
     async def playlist_create(ctx: Context, service: Literal["spotify", "youtube"], name: str, description: str = "",

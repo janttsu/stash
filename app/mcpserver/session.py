@@ -493,12 +493,18 @@ class Session:
         self.api.playlist_discard(playlist_id)
         return "Pending changes dropped; the playlist is as on the service."
 
-    def playlists_sync(self, service: str, force: bool = False) -> str:
-        r = self.api.playlists_sync(service, force)
+    def playlists_sync(self, service: str, force: bool = False, push_pending: bool = False) -> str:
+        r = self.api.playlists_sync(service, force, push_pending)
+        pushed = ""
+        if push_pending:
+            pushed = f"Pushed {len(r['pushed'])} playlists with pending changes" + (
+                f" ({', '.join(r['pushed'])})" if r["pushed"] else "") + (
+                "; push failed: " + "; ".join(f"{f['name']} ({f['error']})" for f in r["push_failed"])
+                if r["push_failed"] else "") + ". "
         skipped = f"; left alone because of pending changes: {', '.join(r['skipped_with_local_changes'])}" \
             if r["skipped_with_local_changes"] else ""
         failed = "; failed: " + "; ".join(f"{f['name']} ({f['error']})" for f in r["failed"]) if r["failed"] else ""
-        return f"Fetched {r['fetched']} of {r['total']} playlists ({r['items']} items) from {r['service']}{skipped}{failed}."
+        return f"{pushed}Fetched {r['fetched']} of {r['total']} playlists ({r['items']} items) from {r['service']}{skipped}{failed}."
 
     def playlist_create(self, service: str, name: str, description: str = "", public: bool = False) -> str:
         r = self.api.playlist_create(service, name, description, public)

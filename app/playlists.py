@@ -386,22 +386,28 @@ def progress(c: Ctx, service: str) -> dict:
 
 
 def _set_progress(key, **fields) -> None:
+    """key None: the caller keeps its own record (sync_all pushing one playlist), so nothing is written."""
+    if key is None:
+        return
     with _progress_lock:
         if fields.get("running") is False:
             _progress.pop(key, None)
         else:
-            _progress.setdefault(key, {"running": True, "done": 0, "total": 0, "name": "", "items": 0}).update(fields)
+            _progress.setdefault(key, {"running": True, "phase": "fetch", "done": 0, "total": 0, "name": "",
+                                       "items": 0}).update(fields)
 
 
-def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = False) -> dict:
+def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = False, *, track: bool = True) -> dict:
     """Fetch the playlists (or one) and their items. A playlist with pending local changes is left alone
-    unless force=True, which discards them."""
+    unless force=True, which discards them. track=False leaves the progress record to the caller (sync_all)."""
     service = _service(service)
     acc = account(c, service)
     if not acc or not acc["access_token"]:
         raise err(409, f"not_connected: connect {service} first on the Playlists page")
     key = (c.uid, service)
-    _set_progress(key, running=True, done=0, total=0, name="", items=0)
+    if not track:
+        return _pull(c, service, acc, None, playlist_id, force)
+    _set_progress(key, running=True, phase="fetch", done=0, total=0, name="", items=0)
     try:
         return _pull(c, service, acc, key, playlist_id, force)
     finally:
@@ -629,7 +635,36 @@ def discard(c: Ctx, playlist_id: int) -> dict:
 
 # --- pushing to the service ----------------------------------------------------------------------------------
 
-def push(c: Ctx, playlist_id: int) -> dict:
+def sync_all(c: Ctx, service: str) -> dict:
+    """Both ways: push every playlist with pending changes to the service, then fetch everything back. A push
+    that fails is reported and its changes stay pending; the fetch then leaves that playlist alone."""
+    service = _service(service)
+    acc = account(c, service)
+    if not acc or not acc["access_token"]:
+        raise err(409, f"not_connected: connect {service} first on the Playlists page")
+    key = (c.uid, service)
+    dirty = c.con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service=? AND dirty>0 AND editable=1"
+                          " AND gone=0 ORDER BY name COLLATE NOCASE", (c.uid, service)).fetchall()
+    pushed, push_failed = [], []
+    _set_progress(key, running=True, phase="push", done=0, total=len(dirty), name="", items=0)
+    try:
+        for n, row in enumerate(dirty):
+            _set_progress(key, done=n, name=row["name"])
+            try:
+                push(c, row["id"], track=False)
+                pushed.append(row["name"])
+            except ServiceError as e:
+                if e.status == 401 or problem_code(c, e).startswith("youtube_api_disabled"):
+                    raise
+                push_failed.append({"name": row["name"], "error": f"{e.status} {e.message}"[:200]})
+        _set_progress(key, phase="fetch", done=0, total=0, name="", items=0)
+        fetched = _pull(c, service, acc, key, None, False)
+    finally:
+        _set_progress(key, running=False)
+    return fetched | {"pushed": pushed, "push_failed": push_failed}
+
+
+def push(c: Ctx, playlist_id: int, *, track: bool = True) -> dict:
     """Make the service's playlist match the local one (items, order, name), then fetch it back."""
     row = playlist(c, playlist_id)
     if not row["editable"]:
@@ -690,7 +725,7 @@ def push(c: Ctx, playlist_id: int) -> dict:
                 changes["calls"] += 1
     with db.tx(con):
         con.execute("UPDATE playlists SET dirty=0 WHERE id=?", (playlist_id,))
-    pulled = pull(c, service, playlist_id, force=True)
+    pulled = pull(c, service, playlist_id, force=True, track=track)
     return {"pushed": changes, "fetched": pulled["fetched"]}
 
 
@@ -818,6 +853,11 @@ def web_disconnect(service: str, c: Ctx = Depends(ctx)):
 @session_api.get("/accounts/{service}/progress")
 def web_progress(service: str, c: Ctx = Depends(ctx)):
     return progress(c, _service(service))
+
+
+@session_api.post("/accounts/{service}/sync-all")
+def web_sync_all(service: str, c: Ctx = Depends(ctx)):
+    return _service_errors(c, lambda: sync_all(c, service))
 
 
 @session_api.post("/accounts/{service}/sync")

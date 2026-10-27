@@ -330,3 +330,35 @@ def test_fetch_summary_and_progress(api, stash, fake):
     assert seen[0]["running"] and seen[0]["total"] == 2 and seen[0]["done"] == 0 and seen[0]["name"] == "Live"
     assert seen[1]["done"] == 1 and seen[1]["items"] == 3 and seen[1]["name"] == "Broken"
     assert stash["raw"].get("/api/playlists/accounts/youtube/progress").status_code == 401
+
+
+def test_synchronise_both_ways(api, stash, fake):
+    """Synchronise pushes every playlist's pending changes, then fetches everything; a plain fetch leaves
+    pending changes alone."""
+    web = stash["web"]
+    connect(stash, "spotify")
+    web.post("/api/playlists/accounts/spotify/sync")
+    pid = next(p["id"] for p in web.get("/api/playlists").json()["playlists"] if p["name"] == "Chill")
+    first = web.get(f"/api/playlists/lists/{pid}").json()["items"][0]["id"]
+    web.post(f"/api/playlists/lists/{pid}/edit", json={"ops": [{"op": "remove", "ids": [first]}]})
+    fake.spotify["pl2"]["name"] = "Not mine (renamed on Spotify)"
+    r = web.post("/api/playlists/accounts/spotify/sync").json()
+    assert r["skipped_with_local_changes"] == ["Chill"] and fake.spotify["pl1"]["tracks"][0] == "t" * 20 + "01"
+    r = web.post("/api/playlists/accounts/spotify/sync-all").json()
+    assert r["pushed"] == ["Chill"] and r["push_failed"] == [] and r["fetched"] == 2 and r["skipped_with_local_changes"] == []
+    assert fake.spotify["pl1"]["tracks"] == ["t" * 20 + "02", "t" * 20 + "03"], "the change reached the service"
+    names = {p["name"]: p for p in web.get("/api/playlists").json()["playlists"]}
+    assert not names["Chill"]["pending"] and names["Chill"]["count"] == 2
+    assert "Not mine (renamed on Spotify)" in names, "and the service's own changes came back"
+    assert web.get("/api/playlists/accounts/spotify/progress").json() == {"running": False}
+    # nothing pending: a synchronise is just a fetch
+    r = web.post("/api/playlists/accounts/spotify/sync-all").json()
+    assert r["pushed"] == [] and r["fetched"] == 2
+    # over MCP, push_pending=true does the same
+    web.post(f"/api/playlists/lists/{pid}/edit", json={"ops": [{"op": "add", "items": ["n" * 22]}]})
+    err, text = Client(stash["raw"], new_key(stash)["key"]).call("playlists_sync", service="spotify", push_pending=True)
+    assert not err and text.startswith("Pushed 1 playlists with pending changes (Chill). Fetched 2 of 2")
+    assert fake.spotify["pl1"]["tracks"][-1] == "n" * 22
+    reader = Client(stash["raw"], new_key(stash, can_write=False)["key"])
+    err, text = reader.call("playlists_sync", service="spotify", push_pending=True)
+    assert err and "read_only_key" in text

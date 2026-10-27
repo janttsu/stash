@@ -290,7 +290,9 @@ only the bookmarks made from it take part in previews, undo and the trash.
 the copy (add by link, remove, drag to reorder, rename; or ask the assistant: "move every live recording from
 Favourites to a new playlist Live") and the changes wait as *pending* until you press **Push**; only then does
 the service change. **Fetch playlists** brings the service's state in; a playlist with pending changes is left
-alone until they are pushed or discarded. Right after connecting, the first fetch starts by itself. A fetch
+alone until they are pushed or discarded. **Synchronise** does both ways for a whole service: it pushes the
+pending changes of every playlist (after asking, and naming them), then fetches everything back; a push that
+fails is listed and its changes stay pending. Right after connecting, the first fetch starts by itself. A fetch
 shows a progress bar (playlist *n* of *m*, its name, items so far) and ends with a summary: how many playlists
 of how many were fetched, how many items, which were left alone and which failed and why; a playlist the
 service refuses does not stop the others. A playlist deleted on the service stays in Stash marked *gone*, and
@@ -327,7 +329,7 @@ playlists are pushed as a whole in one or two calls.
 | `playlist_edit` | pending changes: `add` (addresses or ids, at a position), `remove`, `move`, `order`, `rename` |
 | `playlist_push` | writes the pending changes to the service; the assistant is told to ask first |
 | `playlist_discard` | drops the pending changes and fetches the playlist again |
-| `playlists_sync` | fetches every playlist of a service |
+| `playlists_sync` | fetches every playlist of a service; `push_pending: true` first pushes all pending changes (a two-way sync, only with your consent) |
 | `playlist_create` | a new empty playlist on the service |
 
 ### Project handovers

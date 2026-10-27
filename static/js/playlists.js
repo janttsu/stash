@@ -20,12 +20,20 @@ export async function renderPlaylists(container, params = {}) {
   if (params.fetch && params.connected) await fetchAll(params.connected);
 }
 
+/** Both ways: push every playlist's pending changes (after asking, naming them), then fetch everything. */
+async function syncAll(service, playlists) {
+  const pending = playlists.filter((p) => p.service === service && p.pending && p.editable && !p.gone);
+  if (pending.length && !await confirmBox(t('Push the pending changes of {n} playlists to {service} and then fetch everything back? {names}',
+    { n: pending.length, service: serviceName(service), names: pending.map((p) => p.name).join(', ') }), { okLabel: t('Synchronise') })) return;
+  await fetchAll(service, { both: true });
+}
+
 /** Fetch every playlist of a service, with a progress bar while it runs and a summary when it is done. */
-async function fetchAll(service) {
+async function fetchAll(service, { both = false } = {}) {
   if (view.progress) return;
   view.problem = '';
   view.result = null;
-  view.progress = { service, done: 0, total: 0, name: '', items: 0 };
+  view.progress = { service, phase: both ? 'push' : 'fetch', done: 0, total: 0, name: '', items: 0 };
   await draw();
   let polling = true;
   const poll = async () => {
@@ -40,7 +48,7 @@ async function fetchAll(service) {
   };
   poll();
   try {
-    const r = await api('POST', `/api/playlists/accounts/${service}/sync`);
+    const r = await api('POST', `/api/playlists/accounts/${service}/${both ? 'sync-all' : 'sync'}`);
     view.result = { service, ...r };
   } catch (e) {
     if (String(e.code).startsWith('youtube_api_disabled')) view.problem = e.code;
@@ -55,12 +63,15 @@ async function fetchAll(service) {
 function progressBox() {
   const p = view.progress;
   const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+  const pushing = p.phase === 'push';
   return h('div', { class: 'pl__progress', id: 'pl-progress', role: 'status' },
     h('div', { class: 'row' },
-      h('b', null, t('Fetching playlists from {service}…', { service: serviceName(p.service) })),
-      h('span', { class: 'muted small grow' }, p.total
-        ? t('{done} of {total} playlists · {items} items', { done: p.done, total: p.total, items: p.items })
-        : t('Listing playlists…'))),
+      h('b', null, pushing ? t('Pushing changes to {service}…', { service: serviceName(p.service) })
+        : t('Fetching playlists from {service}…', { service: serviceName(p.service) })),
+      h('span', { class: 'muted small grow' }, pushing
+        ? t('{done} of {total} playlists', { done: p.done, total: p.total })
+        : p.total ? t('{done} of {total} playlists · {items} items', { done: p.done, total: p.total, items: p.items })
+          : t('Listing playlists…'))),
     h('progress', { max: p.total || 1, value: p.total ? p.done : undefined, 'aria-label': `${pct}%` }),
     p.name ? h('div', { class: 'muted small' }, p.name) : null);
 }
@@ -78,12 +89,20 @@ function resultBox() {
       h('div', { class: 'row' }, h('b', { class: 'grow' }, t('Fetching from {service} failed', { service: serviceName(r.service) })), close),
       h('div', { class: 'small' }, r.error));
   }
-  const ok = r.failed.length === 0;
+  const pushFailed = r.push_failed || [];
+  const ok = r.failed.length === 0 && pushFailed.length === 0;
   return h('div', { class: `pl__result ${ok ? 'pl__result--ok' : 'pl__result--bad'}`, role: 'status' },
     h('div', { class: 'row' },
       h('b', { class: 'grow' }, t('{fetched} of {total} playlists fetched from {service} ({items} items)',
         { fetched: r.fetched, total: r.total, service: serviceName(r.service), items: r.items })),
       close),
+    r.pushed ? h('div', { class: 'small' }, r.pushed.length
+      ? t('Changes pushed for {n} of {total} playlists: {names}', { n: r.pushed.length, total: r.pushed.length + pushFailed.length, names: r.pushed.join(', ') })
+      : pushFailed.length ? null : t('There were no pending changes to push.')) : null,
+    pushFailed.length ? [
+      h('div', { class: 'small' }, t('Pushing failed for {n} (their changes are still pending):', { n: pushFailed.length })),
+      h('ul', { class: 'small' }, pushFailed.map((f) => h('li', null, `${f.name}: ${f.error}`))),
+    ] : null,
     r.skipped_with_local_changes.length ? h('div', { class: 'small' },
       t('Left alone because of pending changes: {names}', { names: r.skipped_with_local_changes.join(', ') })) : null,
     r.failed.length ? [
@@ -126,7 +145,14 @@ async function draw() {
       h('span', { class: 'muted small grow' }, a.connected
         ? [t('Connected as {name}', { name: a.display_name || '…' }), a.synced_at && t('synced {date}', { date: fmtDate(a.synced_at) })].filter(Boolean).join(' · ')
         : t('Not connected')),
-      a.connected && h('button', { type: 'button', class: 'btn', disabled: Boolean(view.progress), onclick: () => fetchAll(a.service) }, t('Fetch playlists')),
+      a.connected && h('button', {
+        type: 'button', class: 'btn primary', disabled: Boolean(view.progress), onclick: () => syncAll(a.service, data.playlists),
+        title: t('Push the pending changes of every playlist, then fetch everything back'),
+      }, t('Synchronise')),
+      a.connected && h('button', {
+        type: 'button', class: 'btn', disabled: Boolean(view.progress), onclick: () => fetchAll(a.service),
+        title: t('Only fetch: playlists with pending changes are left alone'),
+      }, t('Fetch playlists')),
       a.connected && h('button', { type: 'button', class: 'btn', onclick: () => createDialog(a.service) }, t('New playlist…')),
       h('button', { type: 'button', class: 'btn', onclick: () => connectDialog(a) }, a.connected ? t('Connect again…') : t('Connect…')),
       a.connected && h('button', { type: 'button', class: 'btn danger-quiet', onclick: () => act(async () => {

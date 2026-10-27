@@ -74,7 +74,9 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   own project, else the connection succeeds and fetching fails; that case is now recognised
   (`problem_code()` → `youtube_api_disabled:<project>`) and the page shows a notice with the direct link. A
   fetch reports progress through `GET /api/playlists/accounts/<service>/progress` (in-memory, one process)
-  and returns a summary (`total`, `fetched`, `items`, `skipped_with_local_changes`, `failed`). Still to check: Spotify for real, Spotify's
+  and returns a summary (`total`, `fetched`, `items`, `skipped_with_local_changes`, `failed`). `sync_all()`
+  (`POST …/sync-all`, the page's *Synchronise*, MCP `playlists_sync(push_pending=true)`) pushes every dirty
+  playlist first (progress phase `push`) and adds `pushed` and `push_failed`. Still to check: Spotify for real, Spotify's
   `/tracks` on more than 100 items, YouTube quota use on a push, and the 7-day end of a *Testing* connection.
   Tokens are refreshed when expired; a failed refresh asks the user to connect again. Items with no id
   (Spotify local files) are skipped.
