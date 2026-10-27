@@ -66,6 +66,8 @@ the copy: `playlists_overview`, `playlist_show`, then `playlist_edit` with ops, 
 `playlist_push` writes them to the service. Show the user what will change and wait for their consent before
 pushing; `playlist_discard` drops pending changes. `playlist_delete` marks a whole playlist to be deleted from the
 service (greyed out in Stash) at the next push or sync, nothing is sent before; keep=true takes the mark back.
+`playlist_publish` makes a Stash-only YouTube playlist real on YouTube; its videos then go out in daily batches
+(YouTube charges 50 quota units per video, 10 000 a day), so a big list takes days: say so to the user.
 Items are referred to by their #item ids from playlist_show;
 new items by address or id. Moving an item between playlists is a remove in one and an add in the other.
   {"op": "add", "items": ["https://…", "id"], "position": 0}   at the end when position is left out
@@ -353,6 +355,13 @@ def build_server(origin: str) -> FastMCP:
     async def playlist_discard(ctx: Context, playlist_id: int) -> str:
         """Drop the pending changes of a playlist and fetch it again from the service."""
         return await run(ctx, "playlist_discard", playlist_id)
+
+    @mcp.tool()
+    async def playlist_publish(ctx: Context, playlist_id: int) -> str:
+        """Make a Stash-only YouTube playlist (Google Takeout import, a list the user built in Stash) real on
+        YouTube: created now, its videos added by the daily youtube-push task within YouTube's quota. Only after
+        the user agrees."""
+        return await run(ctx, "playlist_publish", playlist_id)
 
     @mcp.tool()
     async def playlist_delete(ctx: Context, playlist_id: int,

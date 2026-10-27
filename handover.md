@@ -106,7 +106,17 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   (`mark_delete`, `POST /lists/{id}/delete` and `/keep`, MCP `playlist_delete`) greys the list out; `push()` of
   such a playlist calls `_delete_remote` (YouTube `DELETE /playlists?id=`, Spotify `DELETE /me/library?uris=`)
   and drops the row; `sync_all` includes marked playlists and reports them in `deleted`. A Stash-only playlist
-  is forgotten at once. Test: `test_delete_marked_playlists_at_push_or_sync`.
+  is forgotten at once. Test: `test_delete_marked_playlists_at_push_or_sync`. **Publishing a Stash-only
+  playlist to YouTube** (2026-10-27): `publish()` (`POST /lists/{id}/publish`, MCP `playlist_publish`) creates
+  the playlist on YouTube and turns the row into a synced one with every item `added`; `adopt(local, into)`
+  (no UI; for a script) instead turns an existing YouTube playlist into the Stash-only one (rename + diff),
+  which saves quota when they overlap. YouTube writes cost 50 units each (`YOUTUBE_WRITE_COST`), so `push()`
+  of a YouTube list refuses more than `YOUTUBE_PUSH_MAX` writes unless given a `budget`; with one it runs
+  `_push_youtube_batch` (rename, removals, additions appended in order, each recorded at once, no reordering,
+  fetch back when complete). `push_batch(c, budget)` is what the daily `youtube-push` job runs
+  (`jobs.youtube_push`, `PUSH_BATCH`=160, `scripts/systemd/stash-youtube-push.*` at 10:30): dirty playlists
+  first, then the deletions of marked playlists once nothing is pending. A *quotaExceeded* 403 from YouTube is
+  turned into the rate-limit pause until the next reset (`youtube_quota_reset`, midnight Pacific time).
 - **Subscriptions** (`app/subscriptions.py`, `static/js/subscriptions.js`, 2026-10-27): uses Playlists'
   connections, HTTP client (`_api`, retries) and progress record (key `(uid, "<service>:subscriptions")`).
   Tested against fakes (`tests/mcp/test_subscriptions.py`), not yet against the real services. Spotify's

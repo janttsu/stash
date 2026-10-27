@@ -278,6 +278,11 @@ function playlistDetail(d) {
       }) }, t('Discard changes')),
       !p.dirty && !p.gone && !p.deleting && h('button', { type: 'button', class: 'btn', onclick: () => act(() => api('POST', `/api/playlists/lists/${p.id}/sync`)) },
         p.local ? t('Read the titles again') : t('Fetch again')),
+      p.local && p.service === 'youtube' && h('button', { type: 'button', class: 'btn', onclick: () => act(async () => {
+        if (!await confirmBox(t('Make “{name}” a real YouTube playlist? It is created now (private); its {n} videos are then added by the daily task, about 160 a day, because YouTube charges 50 quota units per video.', { name: p.name, n: d.total }), { okLabel: t('Publish') })) return;
+        const r = await api('POST', `/api/playlists/lists/${p.id}/publish`);
+        toast(t('Created on YouTube: {n} videos pending', { n: r.pending }));
+      }) }, t('Publish to YouTube…')),
       p.editable && !p.local && !p.gone && !p.deleting && h('button', { type: 'button', class: 'btn danger-quiet', onclick: () => act(async () => {
         if (!await confirmBox(t('Delete “{name}” from {service}? It is only marked now, greyed out, and deleted there at the next push or synchronise; nothing is sent until then.', { name: p.name, service: serviceName(p.service) }), { danger: true, okLabel: t('Mark for deletion') })) return;
         await api('POST', `/api/playlists/lists/${p.id}/delete`);

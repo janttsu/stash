@@ -75,18 +75,18 @@ def main():
         assert not status["duplicates"]["overdue"] and status["duplicates"]["ok"]
         assert status["media-sync"]["overdue"] and status["backup"]["overdue"], "never ran"
         me = web.get("/api/me").json()
-        assert set(me["jobs_overdue"]) == {"media-sync", "backup"}, "the administrator (first account) is warned"
+        assert set(me["jobs_overdue"]) == {"media-sync", "backup", "youtube-push"}, "the administrator (first account) is warned"
         assert "jobs_overdue" not in other.get("/api/me").json(), "other accounts are not"
         r = jobs.media_sync()
         assert r["ok"] and r["summary"] == "no music service connected"
         # as the timers run them: each task in a process of its own (a wrong import order shows only there)
-        for name in ("media-sync", "duplicates"):
+        for name in ("media-sync", "duplicates", "youtube-push"):
             run = subprocess.run([sys.executable, "-m", "app.cli", "job", name], cwd=ROOT, capture_output=True, text=True,
                                  env=os.environ)
             assert run.returncode == 0 and f"{name}: ok" in run.stdout, run.stderr[-800:]
         backup()
         assert web.get("/api/me").json()["jobs_overdue"] == []
-        assert {j["name"] for j in web.get("/api/admin").json()["jobs"]} == {"backup", "media-sync", "duplicates"}
+        assert {j["name"] for j in web.get("/api/admin").json()["jobs"]} == {"backup", "media-sync", "duplicates", "youtube-push"}
         rec = json.loads(db.get_config(con, "job:duplicates"))
         db.set_config(con, "job:duplicates", json.dumps(rec | {"last_ok": rec["last_ok"] - 29 * 3600}))
         assert web.get("/api/me").json()["jobs_overdue"] == ["duplicates"], "late: the warning comes back"

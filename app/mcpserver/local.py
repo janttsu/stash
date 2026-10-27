@@ -152,6 +152,9 @@ class LocalAPI:
     def playlist_delete(self, playlist_id: int, keep: bool = False) -> dict:
         return self._playlist_call(lambda c: playlists.mark_delete(c, playlist_id, keep), write=True)
 
+    def playlist_publish(self, playlist_id: int) -> dict:
+        return self._playlist_call(lambda c: playlists.publish(c, playlist_id), write=True)
+
     def playlists_sync(self, service: str, force: bool = False, push_pending: bool = False) -> dict:
         if push_pending:
             return self._playlist_call(lambda c: playlists.sync_all(c, service), write=True)

@@ -82,7 +82,7 @@ without handing it to anyone.
 | `app/tabs.py` | Open browser tabs sent to Stash: lists, states, saving as bookmarks |
 | `app/playlists.py` | Spotify and YouTube playlists: OAuth, fetching, pending edits, pushing back |
 | `app/subscriptions.py` | YouTube channel subscriptions, Spotify followed artists and playlists: fetch, tags, push |
-| `app/jobs.py` | Scheduled tasks (media-sync, duplicates): what they do, their records, the overdue check |
+| `app/jobs.py` | Scheduled tasks (media-sync, duplicates, youtube-push): what they do, their records, the overdue check |
 | `app/versions.py` | Version history: a user's own data from a backup, previewed and restored by area |
 | `scripts/systemd/` | systemd user units and timers for the scheduled tasks |
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
@@ -171,6 +171,7 @@ missing, disabled or failing), every page shows administrators a warning, and Se
 | `backup` (`scripts/backup.sh`) | hourly | the whole database, kept 30 days: the version history (see *Backups* and *Version history*) |
 | `media-sync` (`app.cli job media-sync`) | every 6 hours | fetches every account's playlists and subscriptions from Spotify and YouTube (import only, pushing changes is always the user's own action) and looks up when each YouTube channel last published |
 | `duplicates` (`app.cli job duplicates`) | daily | in every account, tags the later copies of the same address `duplicate` and takes the tag from the oldest copy and from anything that is no longer a duplicate; http and https (and `www.` and a trailing slash) count as the same address |
+| `youtube-push` (`app.cli job youtube-push`) | daily, after YouTube's quota reset | sends the pending changes of YouTube playlists (the videos of a published Stash-only playlist, removals, renames) and then the deletions of playlists marked for it, at most 160 writes a run: YouTube charges 50 of its 10 000 daily quota units per write, so a published list of thousands of videos takes weeks, a batch a day, and every write is recorded as soon as it is done |
 
 `media-sync` keeps within the services' limits: it reads the songs of at most 40 changed playlists per account
 and service in one run (the rest come in the next), skips Spotify playlists whose `snapshot_id` has not changed,
@@ -200,7 +201,12 @@ If `stash.service` has more environment than its `PATH` (for example `STASH_ORIG
 0 * * * *    cd ~/stash && scripts/backup.sh
 17 */6 * * * cd ~/stash && .venv/bin/python -m app.cli job media-sync
 40 4 * * *   cd ~/stash && .venv/bin/python -m app.cli job duplicates
+30 10 * * *  cd ~/stash && .venv/bin/python -m app.cli job youtube-push
 ```
+
+When YouTube answers that the day's quota is spent (*quotaExceeded*), Stash records a pause until the next
+reset (midnight Pacific time) and sends YouTube nothing before it, just as with a long *429*; the page shows
+until when.
 
 ## Backups
 
@@ -350,6 +356,12 @@ YouTube, account fetches leave it alone, *Read the titles again* refreshes them,
 again replaces its contents. Both the older Takeout format ("Video Id, Time Added" after a few lines about the
 playlist) and the newer one ("Video ID, Playlist Video Creation Timestamp") are read.
 
+A Stash-only playlist can later become a real one: **Publish to YouTube…** creates it there at once (private)
+and its videos become pending additions. YouTube charges 50 quota units for every video added, removed or
+moved and 10 000 a day, so the scheduled task `youtube-push` adds them in daily batches of about 160 (see
+*Scheduled tasks*); **Push** on the page sends up to 150 at once and refuses more. The playlist page shows how
+many are still pending. The order on YouTube is the order of addition.
+
 **Synchronise** does both ways for a whole service: it pushes the
 pending changes of every playlist (after asking, and naming them), then fetches everything back; a push that
 fails is listed and its changes stay pending. Right after connecting, the first fetch starts by itself. A fetch
@@ -402,6 +414,7 @@ playlist of your own on Spotify first. Stash uses Spotify's current calls (`/pla
 | `playlist_push` | writes the pending changes to the service; the assistant is told to ask first |
 | `playlist_discard` | drops the pending changes and fetches the playlist again |
 | `playlist_delete` | marks a playlist to be deleted from the service at the next push or synchronise (`keep=true` takes it back) |
+| `playlist_publish` | makes a Stash-only YouTube playlist real on YouTube; its videos follow in daily batches |
 | `playlists_sync` | fetches every playlist of a service; `push_pending: true` first pushes all pending changes (a two-way sync, only with your consent) |
 | `playlist_create` | a new empty playlist on the service |
 

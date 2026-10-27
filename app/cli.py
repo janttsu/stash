@@ -9,7 +9,8 @@
   mail-dns                    the DNS records the sending domain needs (SPF and DKIM) for the mail of reset links
   registration <open|invite|closed>
                               who can create an account (ignored while STASH_REGISTRATION is set)
-  job <media-sync|duplicates> run a scheduled task now (timers run them; see app/jobs.py)
+  job <media-sync|duplicates|youtube-push>
+                              run a scheduled task now (timers run them; see app/jobs.py)
   jobs                        when each scheduled task last ran, and whether it is overdue
 """
 from __future__ import annotations
@@ -74,7 +75,7 @@ def main(argv: list[str]) -> int:
         db.set_config(con, "registration", args[0])
         if fixed := os.environ.get("STASH_REGISTRATION"):
             print(f"note: STASH_REGISTRATION={fixed} is set; the server uses it until it is removed", file=sys.stderr)
-    elif cmd == "job" and len(args) == 1 and args[0] in ("media-sync", "duplicates"):
+    elif cmd == "job" and len(args) == 1 and args[0] in ("media-sync", "duplicates", "youtube-push"):
         from . import jobs
 
         con.close()

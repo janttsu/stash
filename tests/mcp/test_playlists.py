@@ -27,6 +27,7 @@ class Fake:
         self.rate_limited: dict[str, list] = {}   # path -> [how many more 429s, Retry-After]
         self.renamed: dict[str, str] = {}   # YouTube video id -> its new title (the playlist item still shows the old)
         self.deleted: set[str] = set()      # YouTube video ids deleted or made private
+        self.quota_left: int | None = None  # YouTube writes left before the day's quota is spent (None: no limit)
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         u = urlsplit(str(request.url))
@@ -97,6 +98,11 @@ class Fake:
         if request.method == "GET" and self.timeouts.get(path, 0) > 0:
             self.timeouts[path] -= 1
             raise httpx.ReadTimeout("The read operation timed out", request=request)
+        if request.method != "GET" and self.quota_left is not None:
+            if self.quota_left <= 0:
+                return httpx.Response(403, json={"error": {"code": 403, "message": "The request cannot be completed because "
+                                                           "you have exceeded your quota.", "errors": [{"reason": "quotaExceeded"}]}})
+            self.quota_left -= 1
         if path == "/playlistItems" and request.method == "GET" and q.get("playlistId") in self.broken:
             return httpx.Response(404, json={"error": {"message": "playlistNotFound"}})
         if path == "/channels":
@@ -318,6 +324,74 @@ def test_delete_marked_playlists_at_push_or_sync(api, stash, fake):
     assert "marked for deletion" in text
     err, text = mcp.call("playlist_delete", playlist_id=old["id"], keep=True)
     assert not err and "kept" in text and not by_name()["Old"]["deleting"]
+
+
+def test_publish_in_daily_batches_within_quota(api, stash, fake, monkeypatch):
+    """A Stash-only playlist published to YouTube is created at once and its videos sent in daily batches; a
+    spent quota pauses the rest until the reset; an old playlist can be adopted with a diff instead; a
+    playlist marked for deletion goes only when nothing is pending any more."""
+    import time
+
+    from app import db, jobs, playlists
+    from app.main import Ctx
+
+    web = stash["web"]
+    connect(stash, "youtube")
+    web.post("/api/playlists/accounts/youtube/sync")   # PL1 "Live": vid01, vid02, vid03
+    by_name = lambda: {p["name"]: p for p in web.get("/api/playlists").json()["playlists"]}  # noqa: E731
+    videos = lambda pl: [v for _, v in fake.youtube[pl]["items"]]  # noqa: E731
+    csv = "Video ID,Playlist Video Creation Timestamp\n" + "".join(f"vidvidvid{n:02d},2026-01-01T00:00:00+00:00\n" for n in range(4, 10))
+    web.post("/api/playlists/takeout", json={"files": [{"name": "Mix-videos.csv", "text": csv}]})
+    mix = by_name()["Mix"]
+    assert mix["local"] and mix["count"] == 6
+    monkeypatch.setattr(playlists, "YOUTUBE_PUSH_MAX", 4)
+    r = web.post(f"/api/playlists/lists/{mix['id']}/publish").json()
+    assert r["pending"] == 6 and fake.youtube["PL2"]["title"] == "Mix" and videos("PL2") == []
+    mix = by_name()["Mix"]
+    assert not mix["local"] and mix["pending"] == 6 and mix["dirty"] and mix["url"].endswith("PL2")
+    r = web.post(f"/api/playlists/lists/{mix['id']}/push")
+    assert r.status_code == 409 and r.json()["detail"].startswith("too_many_writes"), "6 writes at once are refused"
+    # the daily task sends a batch, in order, and records every write as it goes
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 4)
+    r = jobs.youtube_push()
+    assert r["ok"] and "4 writes" in r["summary"] and "2 items still pending" in r["summary"], r
+    assert videos("PL2") == ["vidvidvid04", "vidvidvid05", "vidvidvid06", "vidvidvid07"] and by_name()["Mix"]["pending"] == 2
+    # the quota runs out mid-batch: the pause is recorded until YouTube's reset and nothing more is sent
+    fake.quota_left = 1
+    r = jobs.youtube_push()
+    assert r["ok"] and "rate_limited" in r["summary"], r
+    assert videos("PL2")[-1] == "vidvidvid08" and by_name()["Mix"]["pending"] == 1, "the write before the limit was kept"
+    con = db.connect()
+    until = int(db.get_config(con, "rate_block:youtube:cid", "0") or 0)
+    assert until > time.time() + 60, "paused until the reset"
+    fake.calls.clear()
+    assert "rate_limited" in jobs.youtube_push()["summary"] and not [x for x in fake.calls if "googleapis" in x], "nothing sent meanwhile"
+    con.execute("DELETE FROM config WHERE key LIKE 'rate_block:%'")
+    con.commit()
+    fake.quota_left = None
+    r = jobs.youtube_push()
+    assert "1 playlists complete" in r["summary"] and "0 items still pending" in r["summary"], r
+    mix = by_name()["Mix"]
+    assert not mix["dirty"] and mix["count"] == 6 and mix["pending"] == 0 and videos("PL2") == [f"vidvidvid{n:02d}" for n in range(4, 10)]
+    # adopting: the old "Live" becomes the Stash-only "Keep" with a diff instead of a fresh playlist
+    web.post("/api/playlists/takeout", json={"files": [{"name": "Keep-videos.csv", "text":
+             "Video ID,Playlist Video Creation Timestamp\nvidvidvid02,2026-01-01T00:00:00+00:00\nvidvidvid09,2026-01-01T00:00:00+00:00\n"}]})
+    c = Ctx(con, con.execute("SELECT * FROM users WHERE username='tester'").fetchone())
+    r = playlists.adopt(c, by_name()["Keep"]["id"], by_name()["Live"]["id"])
+    assert r == {"id": r["id"], "name": "Keep", "kept": 1, "removed": 2, "added": 1}
+    names = by_name()
+    assert "Live" not in names and names["Keep"]["pending"] == 3 and names["Keep"]["url"].endswith("PL1")
+    # a playlist marked for deletion goes only after the pending changes are through, within the same budget
+    web.post(f"/api/playlists/lists/{mix['id']}/delete")
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 3)
+    r = jobs.youtube_push()
+    assert "0 playlists deleted" in r["summary"] and "PL2" in fake.youtube, "not yet: Keep still has a pending write"
+    r = jobs.youtube_push()
+    assert "1 playlists complete" in r["summary"] and "1 playlists deleted" in r["summary"], r
+    assert fake.youtube["PL1"]["title"] == "Keep" and videos("PL1") == ["vidvidvid02", "vidvidvid09"] and "PL2" not in fake.youtube
+    names = by_name()
+    assert "Mix" not in names and names["Keep"]["pending"] == 0 and not names["Keep"]["dirty"]
+    con.close()
 
 
 def test_mcp_tools(api, stash, fake):

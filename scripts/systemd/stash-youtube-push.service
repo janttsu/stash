@@ -1,0 +1,10 @@
+# Stash: send the day's batch of pending YouTube playlist changes (a published playlist's videos, removals,
+# renames, deletions of playlists marked for it) within YouTube's daily quota.
+[Unit]
+Description=Stash: push pending playlist changes to YouTube
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/stash
+Environment=PATH=%h/stash/.venv/bin:/usr/bin:/bin
+ExecStart=%h/stash/.venv/bin/python -m app.cli job youtube-push

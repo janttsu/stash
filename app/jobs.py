@@ -5,9 +5,13 @@
                 changes stays a thing the user starts), in small batches and within the services' limits, and
                 look up when YouTube channels last published, each channel about once a day
   duplicates    daily: tag the later copies of the same address "duplicate", never the oldest one
+  youtube-push  daily, after YouTube's quota reset: the pending changes of YouTube playlists (a published
+                Stash-only playlist's videos, removals, renames) and then the deletions of playlists marked
+                for it, at most PUSH_BATCH writes a run since each costs 50 of the day's 10 000 units
 
     .venv/bin/python -m app.cli job media-sync
     .venv/bin/python -m app.cli job duplicates
+    .venv/bin/python -m app.cli job youtube-push
     .venv/bin/python -m app.cli jobs            # when each task last ran, and whether it is overdue
 
 Each run leaves a record in the config table (job:<name>); the web UI warns administrators when a task has not
@@ -28,7 +32,9 @@ JOBS = {
     "backup": (3, "hourly database backup (30 days of versions)"),
     "media-sync": (14, "fetching playlists and subscriptions every 6 hours"),
     "duplicates": (28, "daily duplicate tagging"),
+    "youtube-push": (28, "daily batch of playlist changes to YouTube, within its quota"),
 }
+PUSH_BATCH = 160             # writes to YouTube per youtube-push run: 8 000 of the day's 10 000 quota units
 PLAYLIST_BATCH = 40          # playlists whose songs are read per account and service in one run
 ACTIVITY_BATCH = 200         # YouTube channels whose newest upload is looked up per account in one run (1 quota unit each)
 ACTIVITY_EVERY = 24 * 3600   # a channel is looked up again after this
@@ -159,4 +165,44 @@ def duplicates() -> dict:
         con.close()
 
 
-RUN = {"media-sync": media_sync, "duplicates": duplicates}
+def youtube_push() -> dict:
+    """Every account with YouTube connected: up to PUSH_BATCH pending writes (playlists.push_batch). A quota
+    that is spent, or a pause YouTube asks for, ends the run without counting as a failure: the next run goes
+    on from where this one stopped, since every write is recorded as soon as it is done."""
+    from . import main  # noqa: F401
+    from . import playlists
+
+    con = db.connect()
+    lines, failures = [], 0
+    try:
+        accounts = con.execute("SELECT user_id FROM playlist_accounts WHERE service='youtube' AND access_token<>''"
+                               " ORDER BY user_id").fetchall()
+        for n, acc in enumerate(accounts):
+            if n:
+                time.sleep(PAUSE_BETWEEN)
+            c = _users(con, f"SELECT * FROM users WHERE id={int(acc['user_id'])}")[0]
+            who = f"{c.user['username']}/youtube"
+            try:
+                r = playlists.push_batch(c, PUSH_BATCH)
+                lines.append(f"{who}: {r['writes']} writes, {len(r['completed'])} playlists complete, {r['remaining']} items"
+                             f" still pending, {len(r['deleted'])} playlists deleted"
+                             + (f", refused by YouTube: {len(r['failed'])}" if r["failed"] else ""))
+            except playlists.ServiceError as e:
+                code = playlists.problem_code(c, e)
+                lines.append(f"{who}: {code}")
+                if not code.startswith("rate_limited"):
+                    failures += 1
+            except Exception as e:  # noqa: BLE001
+                failures += 1
+                lines.append(f"{who}: {getattr(e, 'detail', e)}")
+        summary = "; ".join(lines) or "YouTube not connected"
+        record(con, "youtube-push", failures == 0, summary)
+        return {"ok": failures == 0, "summary": summary}
+    except Exception:
+        record(con, "youtube-push", False, traceback.format_exc()[-1500:])
+        raise
+    finally:
+        con.close()
+
+
+RUN = {"media-sync": media_sync, "duplicates": duplicates, "youtube-push": youtube_push}

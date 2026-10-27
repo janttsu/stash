@@ -499,6 +499,12 @@ class Session:
         self.api.playlist_discard(playlist_id)
         return "Pending changes dropped; the playlist is as on the service."
 
+    def playlist_publish(self, playlist_id: int) -> str:
+        r = self.api.playlist_publish(playlist_id)
+        return (f"Made {r['name']} on YouTube (private, empty). Its {r['pending']} videos are pending additions: the "
+                "scheduled youtube-push task adds about 160 a day within YouTube's quota (50 units per video), or "
+                "playlist_push sends up to 150 now.")
+
     def playlist_delete(self, playlist_id: int, keep: bool = False) -> str:
         r = self.api.playlist_delete(playlist_id, keep)
         if "forgotten" in r:
