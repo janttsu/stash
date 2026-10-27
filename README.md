@@ -295,13 +295,26 @@ alone until they are pushed or discarded. A playlist deleted on the service stay
 
 Each account connects its own developer app for each service (Stash never ships one): Playlists → **Connect…**
 shows the steps for Spotify (developer.spotify.com/dashboard → Create app → Web API → redirect URI → Client ID
-and secret) and for YouTube (a Google Cloud project with the YouTube Data API v3 enabled, an OAuth consent
-screen with yourself as a test user, and a Web application OAuth client with the redirect URI), and the exact
-redirect URI to paste: `https://<your stash>/api/playlists/accounts/<service>/callback`. The app's client id
-and secret and the tokens are stored in the database as they are. While a Google app is in *Testing*, its
-connection ends after seven days (connect again, or set the app to *In production*). YouTube's default quota is
-10 000 units a day and every added, removed or moved item costs about 50; fetching is cheap. Spotify playlists
-are pushed as a whole in one or two calls.
+and secret) and for YouTube, and the exact redirect URI to paste:
+`https://<your stash>/api/playlists/accounts/<service>/callback`. The app's client id and secret and the tokens
+are stored in the database as they are.
+
+For YouTube, everything happens in one Google Cloud project:
+
+1. Enable **YouTube Data API v3** (APIs & Services → Library). If it is missing, connecting works but fetching
+   fails with "YouTube Data API v3 has not been used in project … or it is disabled": enable it in the project
+   the client belongs to, wait a minute, and fetch again (no new connection is needed).
+2. Set up the consent screen (Google Auth Platform → Get started; External). Google allows creating a client
+   only after this.
+3. Add the Google account you sign in to YouTube with under Audience → **Test users**, and leave the app in
+   *Testing*. Without it Google refuses with "has not completed the Google verification process … only
+   developer-approved testers". Publishing the app instead did not work in practice for a personal setup.
+4. Create a client of type **Web application** with the redirect URI. A *Desktop app* client (a JSON file with
+   `"installed"` and `http://localhost`) is the wrong kind: Google would send you back to your own computer.
+
+A Google app in *Testing* ends its connection after seven days; press **Connect again…** then. YouTube's default
+quota is 10 000 units a day and every added, removed or moved item costs about 50; fetching is cheap. Spotify
+playlists are pushed as a whole in one or two calls.
 
 | Tool | What it does |
 | --- | --- |

@@ -67,11 +67,14 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   `/add#tabs=…`): done, tests in `tests/mcp/test_tabs.py`. Saving from MCP makes bookmarks through the normal
   change pipeline, so it is undoable; saving from the page inserts bookmarks directly like the Add page does.
 - **Playlists** (`app/playlists.py`, `static/js/playlists.js`): done and tested against fake Spotify and
-  YouTube (`tests/mcp/test_playlists.py`), but not yet exercised against the real services. First real use
-  should check: the OAuth callback round trip through Caddy, Spotify's `/tracks` endpoints on a playlist of
-  more than 100 items, YouTube quota use on a push, and that a Google app in *Testing* really needs a new
-  connection after seven days. Tokens are refreshed when expired; a failed refresh asks the user to connect
-  again. Items with no id (Spotify local files) are skipped.
+  YouTube (`tests/mcp/test_playlists.py`). YouTube was connected for real on 2026-10-27 for the owner's
+  account: the OAuth round trip through Caddy works. What the real setup taught (now in the page's guide and
+  README): the consent screen must exist before a client can be made; only *Test users* worked, publishing
+  the app did not; a Desktop-app client is the wrong kind; the YouTube Data API must be enabled in the client's
+  own project, else the connection succeeds and fetching fails. Still to check: Spotify for real, Spotify's
+  `/tracks` on more than 100 items, YouTube quota use on a push, and the 7-day end of a *Testing* connection.
+  Tokens are refreshed when expired; a failed refresh asks the user to connect again. Items with no id
+  (Spotify local files) are skipped.
 - **Handovers** (`app/handover.py`, `static/js/handover.js` as a card on the AI page): done, tests in
   `tests/mcp/test_handover.py`; checked live on production with a throwaway account on 2026-10-26.
 - **AI section** (`static/js/ai.js`): the assistant card and change history moved here from Settings

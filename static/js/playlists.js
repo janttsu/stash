@@ -182,10 +182,12 @@ function guide(a) {
       t('Press Connect: Spotify asks you to allow this app to see and change your playlists. In “Development mode” the app works for your own account (and up to 25 accounts you add in User Management).'),
     ]
     : [
-      t('Open console.cloud.google.com and create a project (any name). In “APIs & Services → Library” find “YouTube Data API v3” and enable it.'),
-      t('“APIs & Services → OAuth consent screen”: choose External, give the app a name and your e-mail, and under Audience add your own Google account as a test user.'),
-      t('“APIs & Services → Credentials → Create credentials → OAuth client ID”: type Web application; in “Authorized redirect URIs” paste the address below. Copy the Client ID and Client secret here.'),
-      t('Press Connect and allow access to your YouTube account. While the app is in “Testing”, Google ends the connection after 7 days: then connect again, or set the app’s publishing status to “In production” (your own account can use it without verification; Google shows a warning screen once).'),
+      t('Open console.cloud.google.com and create a project (any name). Do every step below in this same project.'),
+      t('“APIs & Services → Library”: find “YouTube Data API v3” and press Enable. Without it Google lets you connect but fetching fails with “YouTube Data API v3 has not been used in project … or it is disabled”; then enable it, wait a minute and press “Fetch playlists”.'),
+      t('“Google Auth Platform” (or “OAuth consent screen”) → Get started: app name “Stash”, your e-mail, audience External. Google lets you create the client only after this.'),
+      t('Audience → Test users → Add users: add the Google account you sign in to YouTube with, and leave the app in “Testing”. Without this Google says the app “has not completed the Google verification process” and only approved testers have access.'),
+      t('Clients → Create client: type Web application (not Desktop app: a file with “installed” and “http://localhost” in it is the wrong kind); in “Authorized redirect URIs” paste the address below. Copy the Client ID and Client secret here.'),
+      t('Press Connect, sign in with the test-user account and continue past “Google hasn’t verified this app”. In “Testing” Google ends the connection after 7 days: then press “Connect again…”.'),
       t('YouTube gives 10 000 quota units a day: fetching is cheap, but every added, removed or moved item costs about 50, so large reorders are better done in parts or left to Spotify.'),
     ];
   return h('div', { class: 'pl__guide' },
