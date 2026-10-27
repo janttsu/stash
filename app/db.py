@@ -263,6 +263,32 @@ CREATE TABLE IF NOT EXISTS playlist_items (
     state           TEXT NOT NULL DEFAULT 'synced'
 );
 CREATE INDEX IF NOT EXISTS playlist_items_pl ON playlist_items(playlist_id, position);
+-- subscriptions (app/subscriptions.py): YouTube channels, Spotify artists and followed playlists, and YouTube
+-- playlists kept only in Stash (YouTube's API cannot list or save them). state: synced, added (to subscribe
+-- on the next push), removed (to unsubscribe), local (only in Stash). tags and note are Stash's own.
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id           INTEGER PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service      TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    external_id  TEXT NOT NULL,
+    remote_id    TEXT NOT NULL DEFAULT '',
+    title        TEXT NOT NULL DEFAULT '',
+    description  TEXT NOT NULL DEFAULT '',
+    owner        TEXT NOT NULL DEFAULT '',
+    url          TEXT NOT NULL DEFAULT '',
+    item_count   INTEGER,
+    subscribed_at INTEGER,
+    last_activity INTEGER,
+    activity_checked INTEGER,
+    state        TEXT NOT NULL DEFAULT 'synced',
+    gone         INTEGER NOT NULL DEFAULT 0,
+    tags         TEXT NOT NULL DEFAULT '[]',
+    note         TEXT NOT NULL DEFAULT '',
+    synced_at    INTEGER,
+    UNIQUE (user_id, service, kind, external_id)
+);
+CREATE INDEX IF NOT EXISTS subscriptions_user ON subscriptions(user_id, service, kind);
 CREATE TABLE IF NOT EXISTS handover_versions (
     id          INTEGER PRIMARY KEY,
     handover_id INTEGER NOT NULL REFERENCES handovers(id) ON DELETE CASCADE,

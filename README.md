@@ -27,6 +27,9 @@ without handing it to anyone.
      with nothing lost (see *Open tabs* below).
    - **Playlists**: your Spotify and YouTube playlists copied into Stash, edited here (by hand or by the
      assistant) and pushed back to the service; the copy is also a backup (see *Playlists* below).
+   - **Subscriptions**: YouTube channel subscriptions and Spotify's followed artists and playlists, with your
+     own tags and notes, a check for channels that have gone quiet, and subscribing or unsubscribing as pending
+     changes (see *Subscriptions* below).
    - **AI**: one section for everything about assistants: connecting one (the MCP address, keys and your
      standing rules), the handovers it saves, and the changes it made, each undoable.
    - **Trash.** Deleted bookmarks wait 30 days in the trash (account menu → Trash), whichever way they were
@@ -73,6 +76,7 @@ without handing it to anyone.
 | `app/handover.py` | Project handovers saved by assistants through MCP: versions, the web view |
 | `app/tabs.py` | Open browser tabs sent to Stash: lists, states, saving as bookmarks |
 | `app/playlists.py` | Spotify and YouTube playlists: OAuth, fetching, pending edits, pushing back |
+| `app/subscriptions.py` | YouTube channel subscriptions, Spotify followed artists and playlists: fetch, tags, push |
 | `app/importer.py` | Reading and writing browser bookmark files (Netscape HTML) |
 | `app/mcpserver/` | The MCP endpoint `/mcp`: its tools, named result sets, previews and page reading |
 | `scripts/stash-history-sync.py` | Sends Firefox history to Stash (served at `/dl/stash-history-sync.py`) |
@@ -332,6 +336,36 @@ playlists are pushed as a whole in one or two calls.
 | `playlists_sync` | fetches every playlist of a service; `push_pending: true` first pushes all pending changes (a two-way sync, only with your consent) |
 | `playlist_create` | a new empty playlist on the service |
 
+### Subscriptions
+
+**Subscriptions** in the top bar uses the same connections as Playlists. For YouTube it holds your channel
+subscriptions; for Spotify the artists you follow and the playlists you follow (those someone else owns).
+
+- **Fetch** copies them into Stash, which is also a backup (**Export all** downloads them as JSON). A
+  subscription that disappears from the service stays, marked *gone*, with its tags and notes.
+- **Tags and notes** are Stash's own: tag channels by topic, filter and sort by them, write why you follow
+  something. They never leave Stash.
+- **Unsubscribe** and **Add by link…** (a channel `…/@name` or `…/channel/UC…`, a Spotify artist or playlist)
+  mark changes as *pending*. **Synchronise** shows the list, with YouTube's quota cost (about 50 units each,
+  10 000 a day), and only then sends them and fetches everything back. A change the service refuses is listed
+  and stays pending.
+- **Check activity** (YouTube) reads each channel's newest upload, 1 quota unit per channel, so that the
+  filter *No upload in a year* and the sort *Quietest first* can find channels that have gone quiet.
+- **Playlists saved from others on YouTube** cannot be listed or saved through YouTube's API. Added by link,
+  they are kept in Stash only (state *only in Stash*), with their title, owner and size; they are never sent
+  to YouTube.
+
+Spotify needs the permissions `user-follow-read` and `user-follow-modify`; a connection made before Stash asked
+for them is told to *Connect again* on the Playlists page.
+
+| Tool | What it does |
+| --- | --- |
+| `subscriptions_overview` | counts per service and kind, pending changes, tags in use |
+| `subscriptions_list` | the subscriptions by #id, filtered by kind, words, tag, state or `inactive_days`, sorted |
+| `subscriptions_edit` | `subscribe`, `unsubscribe`, `keep`, `tag`, `set_tags`, `note`, `forget` |
+| `subscriptions_sync` | fetches; `push: true` first sends the pending changes (only with your consent) |
+| `subscriptions_activity` | YouTube: reads each channel's newest upload |
+
 ### Project handovers
 
 Besides bookmarks, the MCP server keeps written handovers of your projects: a record of what was done, where
@@ -481,7 +515,7 @@ can check and list but not remove). The verdicts are saved in `~/.cache/stash/li
 .venv/bin/python tests/trash.py    # the trash: every way of deleting, restoring, the 30-day limit
 .venv/bin/python tests/account.py  # e-mail addresses, password reset links (once, one hour), two-factor after a reset
 .venv/bin/python tests/maintenance.py  # the background upkeep of titles and icons
-.venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end, open tabs, playlists (fake services), handovers (pip install pytest)
+.venv/bin/python -m pytest -q tests/mcp    # the MCP tools and /mcp end to end, open tabs, playlists and subscriptions (fake services), handovers (pip install pytest)
 node tests/ui.mjs                  # headless Chromium, its own server on port 8013, screenshots in data/tmp/
 node tools/check-i18n.mjs          # missing or broken Finnish and Swedish translations
 node tools/screenshots.mjs         # the README screenshots, from a demo instance on port 8014

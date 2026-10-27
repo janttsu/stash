@@ -309,6 +309,17 @@ img.fav { background: var(--fav-plate, transparent); }
 .pl__result ol, .pl__result ul { margin: 0; padding-left: 20px; }
 .pl__result p { margin: 0; }
 .pl__guide ol { padding-left: 20px; margin: 0 0 10px; }
+.sub__filters { margin-top: 12px; gap: 8px; flex-wrap: wrap; }
+.sub__filters select { width: auto; }
+.sub__filters input[type=search] { min-width: 160px; }
+.sub__item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
+.sub__text { flex: 1; min-width: 0; }
+.sub__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.sub__meta { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 4px; }
+.sub__badge { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.sub__badge--added { color: var(--accent); font-weight: 600; }
+.sub__badge--removed { color: #c62828; font-weight: 600; }
+.sub__item--removed .sub__title, .sub__item--gone .sub__title { color: var(--muted); text-decoration: line-through; }
 .pl__guide li { margin-bottom: 6px; }
 .pl__guide .row { gap: 8px; align-items: center; flex-wrap: wrap; }
 .pl__uri { padding: 2px 6px; border-radius: 6px; background: var(--surface-2); overflow-wrap: anywhere; }

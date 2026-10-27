@@ -38,7 +38,9 @@ PROVIDERS = {
         "auth": "https://accounts.spotify.com/authorize",
         "token": "https://accounts.spotify.com/api/token",
         "api": "https://api.spotify.com/v1",
-        "scope": "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private",
+        # user-follow-*: followed artists on the Subscriptions page (app/subscriptions.py)
+        "scope": "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private"
+                 " user-follow-read user-follow-modify",
     },
     "youtube": {
         "auth": "https://accounts.google.com/o/oauth2/v2/auth",
@@ -841,6 +843,9 @@ def problem_code(c: Ctx, e: ServiceError) -> str:
         acc = account(c, "youtube")
         project = m.group(1) if m else (acc["client_id"].split("-", 1)[0] if acc and "-" in acc["client_id"] else "")
         return f"youtube_api_disabled:{project}"
+    if e.status in (401, 403) and re.search(r"scope|insufficient", e.message, re.I):
+        # connected before Stash asked for this permission (e.g. Spotify's followed artists): connect again
+        return f"reconnect_needed:{e.service}"
     return f"{e.service}_error: {e.status} {e.message}"
 
 
@@ -849,7 +854,7 @@ def _service_errors(c: Ctx, fn):
         return fn()
     except ServiceError as e:
         code = problem_code(c, e)
-        raise err(409 if code.startswith("youtube_api_disabled") else 502, code) from e
+        raise err(409 if code.startswith(("youtube_api_disabled", "reconnect_needed")) else 502, code) from e
 
 
 @session_api.get("")

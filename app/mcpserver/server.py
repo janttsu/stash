@@ -73,6 +73,19 @@ new items by address or id. Moving an item between playlists is a remove in one 
 A YouTube push costs about 50 quota units per added, removed or moved item (10 000 a day by default), so keep
 big reorders for Spotify or do them in parts.
 
+SUBSCRIPTIONS: YouTube channel subscriptions and Spotify's followed artists and playlists are copied into Stash
+(Subscriptions in the top bar). `subscriptions_list` shows them by #id; `subscriptions_edit` tags them, writes
+notes, and marks channels to subscribe or unsubscribe; those wait as pending until `subscriptions_sync` with
+push=true, which you call only after showing the user the list and getting their consent. On YouTube each
+subscribe or unsubscribe costs 50 of the 10 000 daily quota units; say so for big batches.
+`subscriptions_activity` reads each channel's newest upload so that inactive channels can be found.
+  {"op": "unsubscribe", "ids": [4, 9]}     {"op": "keep", "ids": [4]}   (undo a pending unsubscribe)
+  {"op": "subscribe", "items": ["https://www.youtube.com/@name", "UC…", "https://open.spotify.com/artist/…"]}
+  {"op": "tag", "ids": [4, 9], "add": ["music"], "remove": ["old"]}   {"op": "set_tags", "ids": [4], "tags": ["x"]}
+  {"op": "note", "id": 4, "note": "…"}    {"op": "forget", "ids": [7]}   (Stash's copy only)
+YouTube's API cannot list or save playlists the user saved from others: a YouTube playlist address given to
+subscribe is kept only in Stash (state local) and never sent to YouTube.
+
 OPEN TABS: the user can send a browser's open tabs to Stash (Open tabs in the top bar) to empty the browser and
 sort the tabs out later. `open_tabs_overview` and `open_tabs_list` show them; `open_tabs_save` makes bookmarks
 of the ones worth keeping (an undoable change), `open_tabs_resolve` marks the rest done or dropped, or leaves a
@@ -353,6 +366,44 @@ def build_server(origin: str) -> FastMCP:
                               public: bool = False) -> str:
         """A new empty playlist on the service (made at once), fetched into Stash."""
         return await run(ctx, "playlist_create", service, name, description, public)
+
+    @mcp.tool()
+    async def subscriptions_overview(ctx: Context) -> str:
+        """How many YouTube channels, Spotify artists and followed playlists are kept in Stash, pending changes,
+        and the tags in use."""
+        return await run(ctx, "subscriptions_overview")
+
+    @mcp.tool()
+    async def subscriptions_list(ctx: Context, service: Literal["youtube", "spotify"],
+                                 kind: Literal["", "channel", "artist", "playlist"] = "", text: str = "", tag: str = "",
+                                 state: Literal["", "synced", "added", "removed", "local", "gone"] = "",
+                                 inactive_days: Annotated[int, Field(description="channels with no upload in this many "
+                                                                                 "days (needs subscriptions_activity first)")] = 0,
+                                 sort: Literal["title", "subscribed", "activity", "size"] = "title",
+                                 offset: int = 0, limit: int = 200) -> str:
+        """Subscriptions kept in Stash (#id title | kind | size | last upload | tags | state | note)."""
+        return await run(ctx, "subscriptions_list", service, kind, text, tag, state, inactive_days, sort, offset, limit)
+
+    @mcp.tool()
+    async def subscriptions_edit(ctx: Context, service: Literal["youtube", "spotify"],
+                                 ops: Annotated[list[dict], Field(description="see the instructions: subscribe, "
+                                                                              "unsubscribe, keep, tag, set_tags, note, forget")]) -> str:
+        """Changes to subscriptions in Stash. Subscribing and unsubscribing wait as pending until
+        subscriptions_sync(push=true); tags and notes are Stash's own and take effect at once."""
+        return await run(ctx, "subscriptions_edit", service, ops)
+
+    @mcp.tool()
+    async def subscriptions_sync(ctx: Context, service: Literal["youtube", "spotify"],
+                                 push: Annotated[bool, Field(description="first send the pending subscribes and "
+                                                                         "unsubscribes: only when the user agreed")] = False) -> str:
+        """Fetch the subscriptions from the service into Stash; with push=true first send the pending changes."""
+        return await run(ctx, "subscriptions_sync", service, push)
+
+    @mcp.tool()
+    async def subscriptions_activity(ctx: Context, ids: list[int] | None = None) -> str:
+        """YouTube: read the date of each subscribed channel's newest upload (or the given ones), 1 quota unit per
+        channel, so that subscriptions_list(inactive_days=…) can find channels that have gone quiet."""
+        return await run(ctx, "subscriptions_activity", "youtube", ids)
 
     @mcp.tool()
     async def open_tabs_overview(ctx: Context) -> str:

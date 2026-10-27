@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from .. import main  # noqa: F401  (first: main, api_v1 and history import each other)
-from .. import api_v1, db, handover, history, playlists, tabs  # noqa: E402,I001
+from .. import api_v1, db, handover, history, playlists, subscriptions, tabs  # noqa: E402,I001
 from ..api_v1 import KeyCtx
 
 MAX_OPS = 20_000   # one preview may touch many bookmarks (e.g. new titles for a whole set)
@@ -121,6 +121,9 @@ class LocalAPI:
                                           f"Google Cloud project {project}. Ask the user to enable it at "
                                           f"https://console.cloud.google.com/apis/library/youtube.googleapis.com?project={project}"
                                           ", wait a minute and try again.") from e
+                if code.startswith("reconnect_needed"):
+                    raise StashError(409, f"reconnect_needed: the {e.service} connection lacks a permission Stash now "
+                                          "asks for. Ask the user to press “Connect again…” for it on the Playlists page.") from e
                 raise StashError(502, f"{e.service} answered {e.status}: {e.message}") from e
         return self._call(run)
 
@@ -146,6 +149,26 @@ class LocalAPI:
 
     def playlist_create(self, service: str, name: str, description: str = "", public: bool = False) -> dict:
         return self._playlist_call(lambda c: playlists.create(c, service, name, description, public), write=True)
+
+    # --- subscriptions (app/subscriptions.py) ---------------------------------------------------------------
+
+    def subscriptions_overview(self) -> dict:
+        return self._playlist_call(subscriptions.overview, write=False)
+
+    def subscriptions_list(self, service: str, **spec) -> dict:
+        return self._playlist_call(lambda c: subscriptions.listing(c, service, **spec), write=False)
+
+    def subscriptions_pending(self, service: str) -> dict:
+        return self._playlist_call(lambda c: subscriptions.pending(c, service), write=False)
+
+    def subscriptions_edit(self, service: str, ops: list[dict]) -> dict:
+        return self._playlist_call(lambda c: subscriptions.edit(c, service, ops), write=True)
+
+    def subscriptions_sync(self, service: str, push: bool = False) -> dict:
+        return self._playlist_call(lambda c: subscriptions.sync(c, service, push), write=True)
+
+    def subscriptions_activity(self, service: str, ids: list[int] | None = None) -> dict:
+        return self._playlist_call(lambda c: subscriptions.check_activity(c, service, ids), write=True)
 
     # --- changing -------------------------------------------------------------------------------------
 

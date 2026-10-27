@@ -510,6 +510,71 @@ class Session:
         r = self.api.playlist_create(service, name, description, public)
         return f"Created P{r['id']} {r['name']} on {service} (empty; add items with playlist_edit and push)."
 
+    # --- subscriptions: YouTube channels, Spotify artists and followed playlists ---------------
+
+    def subscriptions_overview(self) -> str:
+        data = self.api.subscriptions_overview()
+        lines = []
+        for a in data["accounts"]:
+            s = data["stats"].get(a["service"], {})
+            kinds = ", ".join(f"{n} {k}s" for k, n in s.get("by_kind", {}).items()) or "none fetched yet (subscriptions_sync)"
+            extra = "".join(f", {s[k]} {label}" for k, label in (("pending", "pending changes"), ("local", "kept only in Stash"),
+                                                                 ("gone", "gone from the service")) if s.get(k))
+            lines.append(f"{a['service']}: " + (f"{kinds}{extra}" if a["connected"] else "not connected (Playlists page → Connect)"))
+        if data["tags"]:
+            lines.append("Tags: " + ", ".join(f"{t} ({n})" for t, n in list(data["tags"].items())[:80]))
+        return "\n".join(lines)
+
+    def subscriptions_list(self, service: str, kind: str = "", text: str = "", tag: str = "", state: str = "",
+                           inactive_days: int = 0, sort: str = "title", offset: int = 0, limit: int = 200) -> str:
+        data = self.api.subscriptions_list(service, kind=kind, text=text, tag=tag, state=state, inactive_days=inactive_days,
+                                           sort=sort, offset=offset, limit=max(1, min(1000, limit)))
+        if not data["total"]:
+            return "No subscriptions match."
+        lines = []
+        for x in data["items"]:
+            last = time.strftime("%Y-%m-%d", time.localtime(x["last_activity"])) if x["last_activity"] else (
+                "no uploads" if x["activity_checked"] else "")
+            bits = [x["kind"], x["owner"] and f"by {x['owner']}", x["item_count"] is not None and f"{x['item_count']} items",
+                    last and f"last upload {last}", x["tags"] and "tags: " + ", ".join(x["tags"]),
+                    x["state"] != "synced" and f"[{x['state']}]", x["gone"] and "[gone]", x["note"] and f"note: {x['note'][:80]}"]
+            lines.append(f"#{x['id']} {x['title']} | " + " | ".join(b for b in bits if b))
+        shown = len(data["items"])
+        more = f"\n… {data['total'] - offset - shown} more (offset {offset + shown})" if offset + shown < data["total"] else ""
+        return f"{data['total']} subscriptions, showing {offset + 1}–{offset + shown}:\n" + "\n".join(lines) + more
+
+    def subscriptions_edit(self, service: str, ops: list) -> str:
+        r = self.api.subscriptions_edit(service, ops)
+        parts = [f"{r[k]} {k}" for k in ("subscribed", "unsubscribed", "kept", "kept_local", "tagged", "noted", "forgotten") if r[k]]
+        out = "Done: " + (", ".join(parts) or "nothing changed") + "."
+        if r["already"]:
+            out += f" {r['already']} already subscribed."
+        if r["unknown"]:
+            out += f" Not recognised: {', '.join(r['unknown'][:10])}."
+        if r["not_found"]:
+            out += f" Not found on {service}: {', '.join(r['not_found'][:10])}."
+        if r["subscribed"] or r["unsubscribed"]:
+            p = self.api.subscriptions_pending(service)
+            out += (f" Pending for the next push: {len(p['subscribe'])} to subscribe, {len(p['unsubscribe'])} to unsubscribe"
+                    + (f" (about {p['quota_units']} YouTube quota units)" if p["quota_units"] else "")
+                    + ". Nothing on the service changes until subscriptions_sync with push=true.")
+        return out
+
+    def subscriptions_sync(self, service: str, push: bool = False) -> str:
+        r = self.api.subscriptions_sync(service, push)
+        head = ""
+        if push:
+            head = f"Pushed {len(r['pushed'])} changes" + (
+                "; failed: " + "; ".join(f"{f['action']} {f['name']} ({f['error']})" for f in r["push_failed"])
+                if r["push_failed"] else "") + ". "
+        kinds = ", ".join(f"{n} {k}s" for k, n in r["by_kind"].items()) or "none"
+        return f"{head}Fetched {r['total']} subscriptions from {service} ({kinds}): {r['new']} new, {r['gone']} gone."
+
+    def subscriptions_activity(self, service: str, ids: list | None = None) -> str:
+        r = self.api.subscriptions_activity(service, ints(ids) if ids else None)
+        failed = "; failed: " + "; ".join(f"{f['name']} ({f['error']})" for f in r["failed"]) if r["failed"] else ""
+        return f"Checked the newest upload of {r['checked']} of {r['total']} channels{failed}. Use subscriptions_list with inactive_days."
+
     # --- open browser tabs sent to Stash to be tidied ------------------------------------------
 
     def open_tabs_overview(self) -> str:

@@ -7,9 +7,10 @@ Last updated 2026-10-26.
 ## What this is
 
 A self-hosted bookmark manager (FastAPI + SQLite + plain ES modules, no build step) with an MCP server for AI
-assistants. The top bar has five sections: **Dashboard**, **My Bookmarks**, **Open tabs** (a browser's open
+assistants. The top bar has six sections: **Dashboard**, **My Bookmarks**, **Open tabs** (a browser's open
 tabs sent here to be sorted out later), **Playlists** (Spotify and YouTube playlists copied in, edited as pending
-changes, pushed back) and **AI** (`static/js/ai.js`: connecting an assistant with keys and rules, the versioned
+changes, pushed back), **Subscriptions** (YouTube channels, Spotify followed artists and playlists, with tags,
+notes and pending subscribe/unsubscribe) and **AI** (`static/js/ai.js`: connecting an assistant with keys and rules, the versioned
 **Handovers** assistants save over MCP, and the undoable changes made with API keys). Settings keeps the rest.
 README.md describes every feature for users; this file is about the work.
 
@@ -80,6 +81,13 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   `/tracks` on more than 100 items, YouTube quota use on a push, and the 7-day end of a *Testing* connection.
   Tokens are refreshed when expired; a failed refresh asks the user to connect again. Items with no id
   (Spotify local files) are skipped.
+- **Subscriptions** (`app/subscriptions.py`, `static/js/subscriptions.js`, 2026-10-27): uses Playlists'
+  connections, HTTP client (`_api`, retries) and progress record (key `(uid, "<service>:subscriptions")`).
+  Tested against fakes (`tests/mcp/test_subscriptions.py`), not yet against the real services. Spotify's
+  scope gained `user-follow-read user-follow-modify`; older connections get `reconnect_needed:spotify`.
+  YouTube has no API for playlists saved from others, so those are `state='local'` entries, never pushed.
+  To check on first real use: the subscriptions list order/paging on a large account, and the quota of
+  the activity check (1 unit per channel).
 - **Handovers** (`app/handover.py`, `static/js/handover.js` as a card on the AI page): done, tests in
   `tests/mcp/test_handover.py`; checked live on production with a throwaway account on 2026-10-26.
 - **AI section** (`static/js/ai.js`): the assistant card and change history moved here from Settings
