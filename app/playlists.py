@@ -87,6 +87,24 @@ class _Client(httpx.Client):
         self._last = 0.0
 
     progress_key = None    # set by a fetch, so that a wait for the rate limit shows on the progress bar
+    block_key = ""         # config key holding when a long rate-limit pause of this app ends (see _api)
+
+    def _blocked_until(self) -> int:
+        if not self.block_key:
+            return 0
+        con = db.connect()
+        try:
+            return int(db.get_config(con, self.block_key, "0") or 0)
+        finally:
+            con.close()
+
+    def _block(self, until: int) -> None:
+        if self.block_key:
+            con = db.connect()
+            try:
+                db.set_config(con, self.block_key, str(until))
+            finally:
+                con.close()
 
     def _pace(self) -> None:
         gap = MIN_INTERVAL.get(self.service, 0)
@@ -97,6 +115,11 @@ class _Client(httpx.Client):
             self._last = time.monotonic()
 
     def send(self, request: httpx.Request, **kwargs) -> httpx.Response:
+        # while the service has paused this app for a long time, send nothing: calls during the pause can make
+        # it longer. The error carries the end of the pause for the page to show.
+        until = self._blocked_until()
+        if until > time.time():
+            raise ServiceError(self.service, 429, f"rate_limited:{until}")
         tries = GET_TRIES if request.method == "GET" else 1
         attempt, limited = 0, 0
         while True:
@@ -120,9 +143,9 @@ class _Client(httpx.Client):
                 wait = RATE_PAUSE * (2 ** limited)
             limited += 1
             if wait > MAX_RATE_WAIT or limited > RATE_TRIES:
-                minutes = max(1, round(wait / 60))
-                raise ServiceError(self.service, 429, f"rate_limited: {self.service} asks to wait about {minutes} min "
-                                                      "before more requests; try again then")
+                until = int(time.time()) + int(wait)
+                self._block(until)
+                raise ServiceError(self.service, 429, f"rate_limited:{until}")
             response.close()
             _set_progress(self.progress_key, waiting=wait)
             time.sleep(wait)
@@ -240,6 +263,8 @@ def _api(c: Ctx, service: str, key=None) -> httpx.Client:
     """An HTTP client for the user's connection. key: the progress record to show rate-limit waits on."""
     http = _http(service, {"Authorization": f"Bearer {_access_token(c, service)}", "Accept": "application/json"})
     http.progress_key = key
+    # a service limits the developer app (client id), so the pause is recorded per app, across restarts
+    http.block_key = f"rate_block:{service}:{account(c, service)['client_id']}"
     return http
 
 
@@ -521,7 +546,7 @@ def pull(c: Ctx, service: str, playlist_id: Optional[int] = None, force: bool = 
 
 def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: bool) -> dict:
     con, t = c.con, db.now()
-    fetched, skipped, failed, item_count, metadata_only = 0, [], [], 0, []
+    fetched, skipped, failed, item_count, metadata_only, unchanged = 0, [], [], 0, [], []
     with _api(c, service, key) as http:
         if playlist_id is not None:
             row = playlist(c, playlist_id)
@@ -552,6 +577,19 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
             if row and row["dirty"] and not force:
                 skipped.append(row["name"])
                 continue
+            if (service == "spotify" and p["editable"] and row and not force and row["snapshot"]
+                    and row["snapshot"] == p["snapshot"] and row["synced_at"]):
+                # Spotify's snapshot_id changes whenever a playlist changes: an unchanged one is not read again,
+                # which keeps an ordinary fetch to a few calls instead of hundreds (Spotify pauses apps that
+                # make too many)
+                with db.tx(con):
+                    con.execute("UPDATE playlists SET name=?, description=?, public=?, synced_at=?, gone=0 WHERE id=?",
+                                (p["name"], p["description"], p["public"], t, row["id"]))
+                unchanged.append(p["name"])
+                n_items = con.execute("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=?", (row["id"],)).fetchone()[0]
+                item_count += n_items
+                fetched += 1
+                continue
             if service == "spotify" and not p["editable"]:
                 # Spotify gives Development Mode apps no contents of playlists that someone else owns (2026):
                 # keep the name, owner and size, and whatever items an earlier fetch stored
@@ -577,7 +615,7 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
             except ServiceError as e:
                 # one playlist the service will not give (deleted meanwhile, a block): note it and go on;
                 # a dead token or a disabled API fails every playlist, so that ends the fetch
-                if e.status == 401 or problem_code(c, e).startswith("youtube_api_disabled") or playlist_id is not None:
+                if e.status in (401, 429) or problem_code(c, e).startswith("youtube_api_disabled") or playlist_id is not None:
                     raise
                 failed.append({"name": p["name"], "error": f"{e.status} {e.message}"[:200]})
                 continue
@@ -607,7 +645,8 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
                     con.execute("UPDATE playlists SET gone=? WHERE id=?", (int(r["external_id"] not in seen), r["id"]))
                 con.execute("UPDATE playlist_accounts SET synced_at=? WHERE id=?", (t, acc["id"]))
     return {"service": service, "total": len(wanted), "fetched": fetched, "items": item_count,
-            "skipped_with_local_changes": skipped, "failed": failed, "metadata_only": metadata_only}
+            "skipped_with_local_changes": skipped, "failed": failed, "metadata_only": metadata_only,
+            "unchanged": len(unchanged)}
 
 
 # --- reading ---------------------------------------------------------------------------------------------
@@ -789,7 +828,7 @@ def sync_all(c: Ctx, service: str) -> dict:
                 push(c, row["id"], track=False)
                 pushed.append(row["name"])
             except ServiceError as e:
-                if e.status == 401 or problem_code(c, e).startswith("youtube_api_disabled"):
+                if e.status in (401, 429) or problem_code(c, e).startswith("youtube_api_disabled"):
                     raise
                 push_failed.append({"name": row["name"], "error": f"{e.status} {e.message}"[:200]})
         _set_progress(key, phase="fetch", done=0, total=0, name="", items=0)
@@ -989,7 +1028,7 @@ def refresh_local(c: Ctx, playlist_id: int) -> dict:
         _store_items(con, playlist_id, items)
         con.execute("UPDATE playlists SET synced_at=?, remote_count=? WHERE id=?", (db.now(), len(items), playlist_id))
     return {"service": "youtube", "total": 1, "fetched": 1, "items": len(items), "skipped_with_local_changes": [],
-            "failed": [], "metadata_only": []}
+            "failed": [], "metadata_only": [], "unchanged": 0}
 
 
 def forget(c: Ctx, playlist_id: int) -> dict:
@@ -1038,6 +1077,8 @@ def problem_code(c: Ctx, e: ServiceError) -> str:
         acc = account(c, "youtube")
         project = m.group(1) if m else (acc["client_id"].split("-", 1)[0] if acc and "-" in acc["client_id"] else "")
         return f"youtube_api_disabled:{project}"
+    if e.status == 429 and e.message.startswith("rate_limited:"):
+        return f"rate_limited:{e.service}:{e.message.split(':', 1)[1]}"   # rate_limited:<service>:<pause ends, epoch>
     if e.status in (401, 403) and re.search(r"scope|insufficient", e.message, re.I):
         # connected before Stash asked for this permission (e.g. Spotify's followed artists): connect again
         return f"reconnect_needed:{e.service}"
@@ -1049,7 +1090,8 @@ def _service_errors(c: Ctx, fn):
         return fn()
     except ServiceError as e:
         code = problem_code(c, e)
-        raise err(409 if code.startswith(("youtube_api_disabled", "reconnect_needed")) else 502, code) from e
+        status = 429 if code.startswith("rate_limited") else 409 if code.startswith(("youtube_api_disabled", "reconnect_needed")) else 502
+        raise err(status, code) from e
 
 
 @session_api.get("")

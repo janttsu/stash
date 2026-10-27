@@ -203,7 +203,7 @@ def check_activity(c: Ctx, service: str, ids: list[int] | None = None) -> dict:
                         if items:
                             last = _iso_time(items[0].get("contentDetails", {}).get("videoPublishedAt"))
                     except ServiceError as e:
-                        if e.status == 401 or problem_code(c, e).startswith("youtube_api_disabled"):
+                        if e.status in (401, 429) or problem_code(c, e).startswith("youtube_api_disabled"):
                             raise
                         if e.status != 404:   # 404: a channel without uploads
                             failed.append({"name": r["title"], "error": f"{e.status} {e.message}"[:200]})
@@ -420,7 +420,7 @@ def sync(c: Ctx, service: str, push: bool = False) -> dict:
                     try:
                         _write(http, service, api, r)
                     except ServiceError as e:
-                        if e.status == 401 or problem_code(c, e).startswith(("youtube_api_disabled", "reconnect_needed")):
+                        if e.status in (401, 429) or problem_code(c, e).startswith(("youtube_api_disabled", "reconnect_needed")):
                             raise
                         failed.append({"name": r["title"], "action": "subscribe" if r["state"] == "added" else "unsubscribe",
                                        "error": f"{e.status} {e.message}"[:200]})

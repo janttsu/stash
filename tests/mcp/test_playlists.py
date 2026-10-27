@@ -147,6 +147,7 @@ def fake(monkeypatch):
 
     con = db.connect()   # each test starts with no accounts and no playlists
     con.execute("DELETE FROM playlist_accounts")
+    con.execute("DELETE FROM config WHERE key LIKE 'rate_block:%'")   # a pause recorded by an earlier test
     con.execute("DELETE FROM playlists")
     con.close()
     f = Fake()
@@ -326,7 +327,7 @@ def test_youtube_api_disabled_is_explained(api, stash, fake):
     fake.api_disabled = False   # the user enabled it: fetching works without connecting again
     r = web.post("/api/playlists/accounts/youtube/sync").json()
     assert r == {"service": "youtube", "total": 1, "fetched": 1, "items": 3, "skipped_with_local_changes": [], "failed": [],
-                 "metadata_only": []}
+                 "metadata_only": [], "unchanged": 0}
 
 
 def test_fetch_summary_and_progress(api, stash, fake):
@@ -431,9 +432,35 @@ def test_rate_limit_is_waited_out(api, stash, fake, monkeypatch):
     fake.rate_limited["/me/playlists"] = [2, 3]
     r = web.post("/api/playlists/accounts/spotify/sync")
     assert r.status_code == 200 and r.json()["fetched"] == 1 and slept.count(3) == 2, "two waits of 3 s, then it went on"
-    fake.rate_limited["/me/playlists"] = [1, 3600]
+    fake.rate_limited["/me/playlists"] = [1, 82000]   # what Spotify answered in production: about 23 hours
     r = web.post("/api/playlists/accounts/spotify/sync")
-    assert r.status_code == 502 and "rate_limited: spotify asks to wait about 60 min" in r.json()["detail"]
+    code = r.json()["detail"]
+    assert r.status_code == 429 and code.startswith("rate_limited:spotify:")
+    until = int(code.rsplit(":", 1)[1])
+    assert 81900 < until - playlists.time.time() <= 82000
+    # during the pause nothing is sent, not even the token refresh or the fetch: calls could lengthen it
+    fake.calls.clear()
+    r = web.post("/api/playlists/accounts/spotify/sync")
+    assert r.status_code == 429 and r.json()["detail"] == code and not [c for c in fake.calls if "api.spotify.com" in c]
+    err, text = Client(stash["raw"], new_key(stash)["key"]).call("playlists_sync", service="spotify")
+    assert err and "paused requests" in text and "Do not retry" in text
+    # Subscriptions use the same app, so the same pause
+    assert web.post("/api/subscriptions/spotify/sync").status_code == 429
+
+
+def test_unchanged_spotify_playlists_are_not_read_again(api, stash, fake):
+    """Spotify's snapshot_id says whether a playlist changed: unchanged ones are skipped, so a routine fetch is
+    a handful of calls."""
+    web = stash["web"]
+    connect(stash, "spotify")
+    web.post("/api/playlists/accounts/spotify/sync")
+    fake.calls.clear()
+    r = web.post("/api/playlists/accounts/spotify/sync").json()
+    assert r["fetched"] == 1 and r["unchanged"] == 1 and r["items"] == 3
+    assert not [c for c in fake.calls if c.endswith("/items")], "the songs were not read again"
+    fake.spotify["pl1"]["tracks"].append("t" * 20 + "04")   # changed on Spotify: a new snapshot
+    r = web.post("/api/playlists/accounts/spotify/sync").json()
+    assert r["unchanged"] == 0 and r["items"] == 4
 
 
 def test_youtube_titles_follow_the_videos(api, stash, fake):

@@ -3,6 +3,7 @@
 // playlists saved from others cannot be read through YouTube's API, so they can be kept here by address only.
 import { api, attempt, confirmBox, fill, fmtDate, h, openModal, promptBox, safeHref, toast } from './core.js';
 import { t } from './i18n.js';
+import { pauseBox } from './playlists.js';
 
 let root = null;
 const view = {
@@ -69,7 +70,7 @@ async function run(kind) {
       : await api('POST', `/api/subscriptions/${service}/sync${kind === 'push' ? '?push=true' : ''}`);
     view.result = { kind, service, ...r };
   } catch (e) {
-    if (/^(youtube_api_disabled|reconnect_needed)/.test(String(e.code))) view.problem = e.code;
+    if (/^(youtube_api_disabled|reconnect_needed|rate_limited)/.test(String(e.code))) view.problem = e.code;
     else view.result = { kind, service, error: e.message };
   } finally {
     polling = false;
@@ -128,6 +129,7 @@ function resultBox() {
 }
 
 function problemBox() {
+  if (view.problem.startsWith('rate_limited')) return pauseBox(view.problem, (s) => SERVICES[s] || s);
   const [code, arg] = view.problem.split(':');
   if (code === 'reconnect_needed') {
     return h('div', { class: 'pl__result pl__result--bad', role: 'alert' },

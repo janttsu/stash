@@ -300,7 +300,9 @@ alone until they are pushed or discarded. The page has one tab per service. Ever
 video's title from the video itself, so a renamed video is renamed in Stash; a video that has been deleted or
 made private keeps the last title Stash saw, marked as such, instead of YouTube's "Deleted video". When a
 service answers *429 Too Many Requests*, Stash waits as long as it asks (shown on the progress bar) and goes on;
-a wait of more than three minutes ends the fetch with a message saying how long to wait.
+a longer pause (Spotify gives apps that made too many requests one of about a day) ends the fetch: the page says
+until when, and Stash sends nothing to that service before then, since requests during the pause can lengthen it.
+A Spotify fetch skips playlists whose snapshot_id has not changed, so a routine fetch is only a few requests.
 
 YouTube's *Watch later* cannot be read through its API (Google closed it, and the history, in 2016), but
 Google Takeout exports it. On the YouTube tab, **Import from Google Takeout…** shows the steps: at

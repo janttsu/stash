@@ -86,6 +86,7 @@ def fake(monkeypatch):
     con = db.connect()
     for table in ("playlist_accounts", "playlists", "subscriptions"):
         con.execute(f"DELETE FROM {table}")
+    con.execute("DELETE FROM config WHERE key LIKE 'rate_block:%'")
     con.close()
     f = SubFake()
     monkeypatch.setattr(playlists, "TRANSPORT", httpx.MockTransport(f))

@@ -124,6 +124,13 @@ class LocalAPI:
                 if code.startswith("reconnect_needed"):
                     raise StashError(409, f"reconnect_needed: the {e.service} connection lacks a permission Stash now "
                                           "asks for. Ask the user to press “Connect again…” for it on the Playlists page.") from e
+                if code.startswith("rate_limited"):
+                    import time as _time
+
+                    until = int(code.rsplit(":", 1)[1] or 0)
+                    raise StashError(429, f"rate_limited: {e.service} has paused requests from the user's app until "
+                                          f"{_time.strftime('%Y-%m-%d %H:%M', _time.localtime(until))}. Do not retry before "
+                                          "then; tell the user.") from e
                 raise StashError(502, f"{e.service} answered {e.status}: {e.message}") from e
         return self._call(run)
 

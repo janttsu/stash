@@ -51,7 +51,7 @@ async function fetchAll(service, { both = false } = {}) {
     const r = await api('POST', `/api/playlists/accounts/${service}/${both ? 'sync-all' : 'sync'}`);
     view.result = { service, ...r };
   } catch (e) {
-    if (String(e.code).startsWith('youtube_api_disabled')) view.problem = e.code;
+    if (/^(youtube_api_disabled|rate_limited)/.test(String(e.code))) view.problem = e.code;
     else view.result = { service, error: e.message };
   } finally {
     polling = false;
@@ -108,6 +108,7 @@ function resultBox() {
       h('div', { class: 'small' }, t('Pushing failed for {n} (their changes are still pending):', { n: pushFailed.length })),
       h('ul', { class: 'small' }, pushFailed.map((f) => h('li', null, `${f.name}: ${f.error}`))),
     ] : null,
+    r.unchanged ? h('div', { class: 'small muted' }, t('{n} unchanged since the last fetch (not read again)', { n: r.unchanged })) : null,
     r.metadata_only?.length ? h('div', { class: 'small' },
       t('{n} playlists owned by someone else: Spotify gives apps only their name, owner and size, not the songs.', { n: r.metadata_only.length })) : null,
     r.skipped_with_local_changes.length ? h('div', { class: 'small' },
@@ -119,7 +120,19 @@ function resultBox() {
 }
 
 /** Google answered that the YouTube Data API is not enabled in the project of the user's client. */
+/** A service has paused this app for a while (rate_limited:<service>:<end, epoch>): say until when. */
+export function pauseBox(code, serviceLabel) {
+  const [, service, until] = code.split(':');
+  const end = new Date(Number(until) * 1000);
+  return h('div', { class: 'pl__result pl__result--bad', role: 'alert' },
+    h('b', null, t('{service} has paused requests from your app until {time}', {
+      service: serviceLabel(service), time: end.toLocaleString(document.documentElement.lang || undefined,
+        { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) })),
+    h('p', { class: 'small' }, t('This happens when an app makes many requests in a short time. Stash sends nothing to {service} until then, because requests during the pause can make it longer. Everything already in Stash stays usable; fetch again after that time. Routine fetches now skip unchanged playlists, so they make only a few requests.', { service: serviceLabel(service) })));
+}
+
 function problemBox() {
+  if (view.problem.startsWith('rate_limited')) return pauseBox(view.problem, serviceName);
   const project = view.problem.split(':')[1] || '';
   const link = `https://console.cloud.google.com/apis/library/youtube.googleapis.com${project ? `?project=${project}` : ''}`;
   return h('div', { class: 'pl__result pl__result--bad', role: 'alert' },
