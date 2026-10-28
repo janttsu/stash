@@ -28,7 +28,8 @@ without handing it to anyone.
    - **Playlists**: your Spotify and YouTube playlists copied into Stash, edited here (by hand or by the
      assistant) and pushed back to the service; a whole playlist can be marked for deletion the same way;
      Google Takeout lists (Watch later) live only in Stash; the copy is also a backup (see *Playlists* below).
-   - **Subscriptions**: YouTube channel subscriptions and Spotify's followed artists and playlists, grouped by
+   - **Subscriptions**: YouTube channel subscriptions and Spotify's followed artists and playlists and saved
+     albums, grouped by
      your own topic tags so that hundreds of channels stay findable, with notes, a check for channels that
      have gone quiet (kept current by a scheduled task), and subscribing or unsubscribing as pending changes
      (see *Subscriptions* below).
@@ -81,7 +82,7 @@ without handing it to anyone.
 | `app/handover.py` | Project handovers saved by assistants through MCP: versions, the web view |
 | `app/tabs.py` | Open browser tabs sent to Stash: lists, states, saving as bookmarks |
 | `app/playlists.py` | Spotify and YouTube playlists: OAuth, fetching, pending edits, pushing back |
-| `app/subscriptions.py` | YouTube channel subscriptions, Spotify followed artists and playlists: fetch, tags, push |
+| `app/subscriptions.py` | YouTube channel subscriptions, Spotify followed artists and playlists and saved albums: fetch, tags, push |
 | `app/jobs.py` | Scheduled tasks (media-sync, duplicates, youtube-push): what they do, their records, the overdue check |
 | `app/versions.py` | Version history: a user's own data from a backup, previewed and restored by area |
 | `scripts/systemd/` | systemd user units and timers for the scheduled tasks |

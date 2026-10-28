@@ -28,7 +28,7 @@ from .main import Ctx, clean_text, ctx, err, norm_tags
 from .playlists import (PROVIDERS, ServiceError, _api, _check, _iso_time, _progress, _progress_lock, _service,
                         _service_errors, _set_progress, account, problem_code, spotify_total)
 
-KINDS = {"youtube": ("channel", "playlist"), "spotify": ("artist", "playlist")}
+KINDS = {"youtube": ("channel", "playlist"), "spotify": ("artist", "playlist", "album")}
 MAX_SUBSCRIPTIONS = 5000
 YT_WRITE_UNITS = 50
 
@@ -109,6 +109,21 @@ def _remote_spotify(http, acc, on_page) -> list[dict]:
                             "description": (p.get("description") or "")[:1000],
                             "owner": p.get("owner", {}).get("display_name") or p.get("owner", {}).get("id", ""),
                             "item_count": spotify_total(p), "subscribed_at": None})
+        on_page(len(out), None)
+        url = data.get("next")
+    # saved albums (the library's Albums); user-library-read
+    url, params = f"{api}/me/albums", {"limit": 50}
+    while url and len(out) < MAX_SUBSCRIPTIONS:
+        data = _check("spotify", http.get(url, params=params))
+        params = None
+        for x in data.get("items", []):
+            a = x.get("album") or {}
+            if not a.get("id"):
+                continue
+            out.append({"kind": "album", "external_id": a["id"], "remote_id": "", "title": a.get("name", ""),
+                        "description": a.get("release_date", "")[:4],
+                        "owner": ", ".join(ar.get("name", "") for ar in a.get("artists", [])[:3]),
+                        "item_count": a.get("total_tracks"), "subscribed_at": _iso_time(x.get("added_at"))})
         on_page(len(out), None)
         url = data.get("next")
     return out
@@ -255,7 +270,7 @@ def parse_target(service: str, text: str) -> tuple[str, str]:
         if lst:
             return "playlist", lst
         return "", ""
-    m = re.match(r"^spotify:(artist|playlist):([A-Za-z0-9]{22})$", text)
+    m = re.match(r"^spotify:(artist|playlist|album):([A-Za-z0-9]{22})$", text)
     if m:
         return m.group(1), m.group(2)
     try:
@@ -266,7 +281,7 @@ def parse_target(service: str, text: str) -> tuple[str, str]:
         return "", ""
     parts = [p for p in u.path.split("/") if p]
     for i, p in enumerate(parts[:-1]):
-        if p in ("artist", "playlist") and _SP_ID.match(parts[i + 1]):
+        if p in ("artist", "playlist", "album") and _SP_ID.match(parts[i + 1]):
             return p, parts[i + 1]
     return "", ""
 
@@ -308,6 +323,10 @@ def _resolve(http, service: str, kind: str, ref: str) -> Optional[dict]:
         a = _check(service, http.get(f"{api}/artists/{ref}"))
         return {"external_id": a["id"], "title": a.get("name", ""), "description": ", ".join(a.get("genres", [])[:5]),
                 "owner": "", "item_count": a.get("followers", {}).get("total")}
+    if kind == "album":
+        a = _check(service, http.get(f"{api}/albums/{ref}"))
+        return {"external_id": a["id"], "title": a.get("name", ""), "description": a.get("release_date", "")[:4],
+                "owner": ", ".join(ar.get("name", "") for ar in a.get("artists", [])[:3]), "item_count": a.get("total_tracks")}
     p = _check(service, http.get(f"{api}/playlists/{ref}"))
     return {"external_id": p["id"], "title": p.get("name", ""), "description": (p.get("description") or "")[:1000],
             "owner": p.get("owner", {}).get("display_name") or p.get("owner", {}).get("id", ""),

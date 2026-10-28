@@ -19,7 +19,7 @@ function remembered(key, fallback) {
 function remember(key, value) {
   try { localStorage.setItem(`stash.subscriptions.${key}`, value); } catch { /* private window or storage off */ }
 }
-const KIND = () => ({ channel: t('Channel'), artist: t('Artist'), playlist: t('Playlist') });
+const KIND = () => ({ channel: t('Channel'), artist: t('Artist'), playlist: t('Playlist'), album: t('Album') });
 
 export async function renderSubscriptions(container, params = {}) {
   root = container;
@@ -175,7 +175,7 @@ async function draw() {
     class: 'input', onchange: (e) => { view[key] = onchange ? onchange(e.target.value) : e.target.value; draw(); },
   }, options.map(([v, text]) => h('option', { value: v, selected: String(view[key]) === String(v) }, text)));
 
-  const kinds = view.service === 'youtube' ? ['channel', 'playlist'] : ['artist', 'playlist'];
+  const kinds = view.service === 'youtube' ? ['channel', 'playlist'] : ['artist', 'playlist', 'album'];
   const filters = h('div', { class: 'row sub__filters' },
     sel('kind', [['', t('All kinds')], ...kinds.map((k) => [k, KIND()[k]])]),
     sel('state', [['', t('Any state')], ['synced', t('Subscribed')], ['added', t('To subscribe')], ['removed', t('To unsubscribe')],
@@ -203,6 +203,7 @@ async function draw() {
         h('a', { href: safeHref(x.url), target: '_blank', rel: 'noopener noreferrer', class: 'sub__title' }, x.title || x.external_id),
         h('div', { class: 'muted small' }, [KIND()[x.kind], x.owner && t('by {name}', { name: x.owner }),
           x.item_count != null && (x.kind === 'artist' ? t('{n} followers', { n: x.item_count }) : t('{n} videos or tracks', { n: x.item_count })),
+          x.kind === 'album' && x.description,
           last, x.subscribed_at && t('since {date}', { date: fmtDate(x.subscribed_at) })].filter(Boolean).join(' · ')),
         (x.tags.length || stateLabel || x.gone || x.note) ? h('div', { class: 'sub__meta' },
           stateLabel ? h('span', { class: `sub__badge sub__badge--${x.state}` }, stateLabel) : null,
@@ -224,7 +225,7 @@ async function draw() {
     h('div', { class: 'row' },
       h('h2', { class: 'grow' }, t('Subscriptions')),
       h('a', { class: 'btn', href: '/api/subscriptions/export', download: '' }, t('Export all (JSON)'))),
-    h('p', { class: 'muted' }, t('Your YouTube channel subscriptions and the artists and playlists you follow on Spotify, copied into Stash: a backup you can tag, annotate and sort. Unsubscribing and subscribing wait as pending until you press “Synchronise”. Ask your assistant, for example “which channels have not uploaded in a year?”.')),
+    h('p', { class: 'muted' }, t('Your YouTube channel subscriptions and the artists, playlists and albums you follow or saved on Spotify, copied into Stash: a backup you can tag, annotate and sort. Unsubscribing and subscribing wait as pending until you press “Synchronise”. Ask your assistant, for example “which channels have not uploaded in a year?”.')),
     tabs,
     h('div', { class: 'pl__account' },
       h('div', { class: 'row' },
@@ -284,7 +285,7 @@ async function addDialog() {
   const ok = await openModal(t('Add by link'), h('div', { class: 'form' },
     h('p', { class: 'muted' }, view.service === 'youtube'
       ? t('Channel addresses (…/@name, …/channel/UC…) become pending subscriptions. Playlist addresses are kept only in Stash.')
-      : t('Artist and playlist addresses become pending follows.')),
+      : t('Artist, playlist and album addresses become pending follows.')),
     h('label', { class: 'field' }, h('span', null, t('Addresses')), text)), [
     { label: t('Cancel') },
     { label: t('Add'), kind: 'primary', action: () => text.value.trim() !== '' },

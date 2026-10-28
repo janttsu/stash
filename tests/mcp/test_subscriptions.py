@@ -22,6 +22,7 @@ class SubFake(Fake):
         self.subs = {f"sub-{cid}": cid for cid in CH}           # YouTube: subscription id -> channel id
         self.artists = {"a" * 22: "Artist A", "b" * 22: "Artist B"}
         self.followed_artists = {"a" * 22}
+        self.saved_albums = {"x" * 22}
         self.unfollowed_playlists: set[str] = set()
         self.scope_missing = False
         self.lookups: list[dict] = []     # the channels.list queries made to resolve addresses
@@ -72,12 +73,23 @@ class SubFake(Fake):
                 _, kind, sid = uri.split(":")
                 if kind == "artist":
                     self.followed_artists = self.followed_artists | {sid} if request.method == "PUT" else self.followed_artists - {sid}
+                elif kind == "album":
+                    self.saved_albums = self.saved_albums | {sid} if request.method == "PUT" else self.saved_albums - {sid}
                 elif request.method == "DELETE":
                     self.unfollowed_playlists.add(sid)
                     self.spotify.pop(sid, None)
             return httpx.Response(200)
         if path.endswith("/followers"):
             return forbidden
+        if path == "/me/albums":
+            items = [{"added_at": "2024-02-03T04:05:06Z", "album": {"id": a, "name": f"Album {a[0]}", "release_date": "1999-01-01",
+                                                                  "total_tracks": 11, "artists": [{"name": "Artist A"}]}}
+                     for a in sorted(self.saved_albums)]
+            return httpx.Response(200, json={"items": items, "total": len(items), "next": None})
+        if path.startswith("/albums/"):
+            a = path.split("/")[2]
+            return httpx.Response(200, json={"id": a, "name": f"Album {a[0]}", "release_date": "2001", "total_tracks": 9,
+                                             "artists": [{"name": "Artist B"}]})
         if path.startswith("/artists/"):
             a = path.split("/")[2]
             return httpx.Response(200, json={"id": a, "name": self.artists[a], "genres": []})
@@ -233,15 +245,18 @@ def test_spotify_artists_and_followed_playlists(api, stash, fake):
     web = stash["web"]
     connect(stash, "spotify")
     r = web.post("/api/subscriptions/spotify/sync").json()
-    assert r["by_kind"] == {"artist": 1, "playlist": 1}, "pl2 is owned by someone else: a followed playlist"
+    assert r["by_kind"] == {"artist": 1, "playlist": 1, "album": 1}, "pl2 is owned by someone else: a followed playlist"
     subs = ids(web, "spotify")
     assert subs["Artist A"]["kind"] == "artist" and subs["Not mine"]["owner"] == "other"
+    assert subs["Album x"]["kind"] == "album" and subs["Album x"]["owner"] == "Artist A" and subs["Album x"]["item_count"] == 11
     web.post("/api/subscriptions/spotify/edit", json={"ops": [
-        {"op": "unsubscribe", "ids": [subs["Not mine"]["id"]]},
-        {"op": "subscribe", "items": ["https://open.spotify.com/artist/" + "b" * 22 + "?si=x"]}]})
+        {"op": "unsubscribe", "ids": [subs["Not mine"]["id"], subs["Album x"]["id"]]},
+        {"op": "subscribe", "items": ["https://open.spotify.com/artist/" + "b" * 22 + "?si=x",
+                                      "https://open.spotify.com/album/" + "y" * 22]}]})
     r = web.post("/api/subscriptions/spotify/sync?push=true").json()
-    assert len(r["pushed"]) == 2 and r["push_failed"] == []
+    assert len(r["pushed"]) == 4 and r["push_failed"] == []
     assert fake.followed_artists == {"a" * 22, "b" * 22} and fake.unfollowed_playlists == {"pl2"}
+    assert fake.saved_albums == {"y" * 22}, "albums saved and removed through /me/library"
     subs = ids(web, "spotify")
     assert subs["Artist B"]["state"] == "synced" and subs["Not mine"]["gone"]
     assert web.get("/api/subscriptions/spotify/pending").json()["quota_units"] == 0

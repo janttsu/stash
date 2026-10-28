@@ -125,6 +125,8 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   connections, HTTP client (`_api`, retries) and progress record (key `(uid, "<service>:subscriptions")`).
   Tested against fakes (`tests/mcp/test_subscriptions.py`), not yet against the real services. Spotify's
   scope gained `user-follow-read user-follow-modify`; older connections get `reconnect_needed:spotify`.
+  Spotify saved albums are kind `album` (2026-10-28): fetched from `/me/albums` (`user-library-read`), saved
+  and removed through `/me/library` like artists.
   YouTube has no API for playlists saved from others, so those are `state='local'` entries, never pushed.
   To check on first real use: the subscriptions list order/paging on a large account, and the quota of
   the activity check (1 unit per channel). The page groups the list by tag by default (`grouped()` in

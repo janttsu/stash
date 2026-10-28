@@ -393,7 +393,7 @@ def build_server(origin: str) -> FastMCP:
 
     @mcp.tool()
     async def subscriptions_list(ctx: Context, service: Literal["youtube", "spotify"],
-                                 kind: Literal["", "channel", "artist", "playlist"] = "", text: str = "", tag: str = "",
+                                 kind: Literal["", "channel", "artist", "playlist", "album"] = "", text: str = "", tag: str = "",
                                  state: Literal["", "synced", "added", "removed", "local", "gone"] = "",
                                  inactive_days: Annotated[int, Field(description="channels with no upload in this many "
                                                                                  "days (needs subscriptions_activity first)")] = 0,
