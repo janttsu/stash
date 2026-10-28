@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import json
 import os
 import re
@@ -102,6 +103,7 @@ async def lifespan(app: FastAPI):
         await app.state.http.aclose()
 
 
+log = logging.getLogger("stash")
 app = FastAPI(title="Stash", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -533,8 +535,12 @@ def register(body: Register, request: Request, response: Response, con=Depends(g
 
 @app.post("/api/login")
 def login(body: Login, request: Request, response: Response, con=Depends(get_db)):
+    """Sign-in. A refusal is logged with its reason, the user name typed and the address it came from (never
+    the password), so that an administrator can see why an account cannot get in."""
     keys = (f"login:{client_ip(request)}", f"login-user:{body.username.strip().lower()}")
+    who = f"login refused for {body.username.strip()!r} from {client_ip(request)}"
     if limiter.blocked(keys[0], 20, 900) or limiter.blocked(keys[1], 10, 900):
+        log.warning("%s: too_many_attempts (the limit is kept in memory: a restart clears it)", who)
         raise err(429, "too_many_attempts")
     user = con.execute("SELECT * FROM users WHERE username=?", (body.username.strip(),)).fetchone()
     # verify against a dummy hash for unknown users so both paths take the same time
@@ -542,20 +548,24 @@ def login(body: Login, request: Request, response: Response, con=Depends(get_db)
     if not user or not ok:
         for key in keys:
             limiter.hit(key)
+        log.warning("%s: %s", who, "no such user name" if not user else "wrong password")
         raise err(401, "invalid_credentials")
     if user["totp_on"]:
         if not body.totp:
+            log.warning("%s: a second-step code is required", who)
             raise err(401, "totp_required")
         counter = security.verify_totp(user["totp_secret"], body.totp, user["totp_last"])
         if counter is None:
             for key in keys:
                 limiter.hit(key)
+            log.warning("%s: the second-step code is wrong or used", who)
             raise err(401, "bad_totp")
         # spent atomically: two sign-ins with the same code at the same moment cannot both get through
         if not con.execute("UPDATE users SET totp_last=? WHERE id=? AND totp_last<?",
                            (counter, user["id"], counter)).rowcount:
             for key in keys:
                 limiter.hit(key)
+            log.warning("%s: the second-step code was used already", who)
             raise err(401, "bad_totp")
     start_session(con, response, user["id"], body.remember)
     return {"ok": True}
