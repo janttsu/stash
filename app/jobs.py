@@ -13,6 +13,7 @@
     .venv/bin/python -m app.cli job media-sync
     .venv/bin/python -m app.cli job duplicates
     .venv/bin/python -m app.cli job youtube-push
+    .venv/bin/python -m app.cli job spotify-push   # the same for Spotify: SPOTIFY_BATCH calls, one a second
     .venv/bin/python -m app.cli jobs            # when each task last ran, and whether it is overdue
 
 Each run leaves a record in the config table (job:<name>); the web UI warns administrators when a task has not
@@ -34,8 +35,11 @@ JOBS = {
     "media-sync": (14, "fetching playlists and subscriptions every 6 hours"),
     "duplicates": (28, "daily duplicate tagging"),
     "youtube-push": (28, "daily batch of playlist changes to YouTube, within its quota"),
+    "spotify-push": (28, "daily batch of playlist changes to Spotify, a few calls a day"),
 }
 PUSH_BATCH = 160             # writes to YouTube per youtube-push run: 8 000 of the day's 10 000 quota units
+SPOTIFY_BATCH = 60           # calls to Spotify per spotify-push run (a hundred tracks each at most)
+SPOTIFY_PACE = 1.0           # seconds between those calls
 PLAYLIST_BATCH = 40          # playlists whose songs are read per account and service in one run
 ACTIVITY_BATCH = 200         # YouTube channels whose newest upload is looked up per account in one run (1 quota unit each)
 ACTIVITY_EVERY = 24 * 3600   # a channel is looked up again after this
@@ -216,4 +220,44 @@ def youtube_push() -> dict:
         con.close()
 
 
-RUN = {"media-sync": media_sync, "duplicates": duplicates, "youtube-push": youtube_push}
+def spotify_push() -> dict:
+    """Every account with Spotify connected: up to SPOTIFY_BATCH calls of pending playlist changes
+    (playlists.push_batch), one call a second. Spotify has no daily quota but pauses an app that calls too
+    much, so the batch stays small and a pause ends the run without counting as a failure."""
+    from . import main  # noqa: F401
+    from . import playlists
+
+    con = db.connect()
+    lines, failures = [], 0
+    try:
+        accounts = con.execute("SELECT user_id FROM playlist_accounts WHERE service='spotify' AND access_token<>''"
+                               " ORDER BY user_id").fetchall()
+        playlists.MIN_INTERVAL["spotify"] = max(playlists.MIN_INTERVAL.get("spotify", 0), SPOTIFY_PACE)
+        for n, acc in enumerate(accounts):
+            if n:
+                time.sleep(PAUSE_BETWEEN)
+            c = _users(con, f"SELECT * FROM users WHERE id={int(acc['user_id'])}")[0]
+            who = f"{c.user['username']}/spotify"
+            try:
+                r = playlists.push_batch(c, SPOTIFY_BATCH, "spotify")
+                lines.append(f"{who}: {r['writes']} calls, {len(r['completed'])} playlists complete, {r['remaining']} items"
+                             f" still pending, {len(r['deleted'])} playlists deleted")
+            except playlists.ServiceError as e:
+                code = playlists.problem_code(c, e)
+                lines.append(f"{who}: {code}")
+                if not code.startswith("rate_limited"):
+                    failures += 1
+            except Exception as e:  # noqa: BLE001
+                failures += 1
+                lines.append(f"{who}: {getattr(e, 'detail', e)}")
+        summary = "; ".join(lines) or "Spotify not connected"
+        record(con, "spotify-push", failures == 0, summary)
+        return {"ok": failures == 0, "summary": summary}
+    except Exception:
+        record(con, "spotify-push", False, traceback.format_exc()[-1500:])
+        raise
+    finally:
+        con.close()
+
+
+RUN = {"media-sync": media_sync, "duplicates": duplicates, "youtube-push": youtube_push, "spotify-push": spotify_push}

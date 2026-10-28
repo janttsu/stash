@@ -501,9 +501,11 @@ class Session:
 
     def playlist_publish(self, playlist_id: int) -> str:
         r = self.api.playlist_publish(playlist_id)
-        return (f"Made {r['name']} on YouTube (private, empty). Its {r['pending']} videos are pending additions: the "
-                "scheduled youtube-push task adds about 160 a day within YouTube's quota (50 units per video), or "
-                "playlist_push sends up to 150 now.")
+        service = self._service_of(playlist_id)
+        how = ("the scheduled youtube-push task adds about 160 a day within YouTube's quota (50 units per video), or "
+               "playlist_push sends up to 150 now" if service == "youtube"
+               else "the scheduled spotify-push task adds them a few thousand a day, or playlist_push sends them now")
+        return f"Made {r['name']} on {service} (private, empty). Its {r['pending']} items are pending additions: {how}."
 
     def playlist_delete(self, playlist_id: int, keep: bool = False) -> str:
         r = self.api.playlist_delete(playlist_id, keep)

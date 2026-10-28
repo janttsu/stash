@@ -84,7 +84,10 @@ class Fake:
                 return httpx.Response(200, json={"next": None, "total": len(p["tracks"]), "items": [
                     {"added_at": "2026-01-02T03:04:05Z", "item": tr(i)} for i in p["tracks"]]})
             ids = [x.split(":")[-1] for x in body["uris"]]
-            p["tracks"] = ids if request.method == "PUT" else p["tracks"] + ids
+            if request.method == "DELETE":
+                p["tracks"] = [t for t in p["tracks"] if t not in ids]
+            else:
+                p["tracks"] = ids if request.method == "PUT" else p["tracks"] + ids
             return httpx.Response(200, json={"snapshot_id": "snap-new"})
         if request.method == "PUT":
             p.update({"name": body["name"], "description": body["description"], "public": body["public"]})
@@ -409,6 +412,44 @@ def test_publish_in_daily_batches_within_quota(api, stash, fake, monkeypatch):
     assert fake.youtube["PL1"]["title"] == "Keep" and videos("PL1") == ["vidvidvid02", "vidvidvid09"] and "PL2" not in fake.youtube
     names = by_name()
     assert "Mix" not in names and names["Keep"]["pending"] == 0 and not names["Keep"]["dirty"]
+    con.close()
+
+
+def test_publish_to_spotify_in_batches(api, stash, fake, monkeypatch):
+    """A Stash-only Spotify playlist is created on Spotify at once and its tracks sent a hundred a call by the
+    daily spotify-push, which also deletes the playlists marked for it once nothing is pending."""
+    from app import db, jobs, playlists
+    from app.main import Ctx
+
+    web = stash["web"]
+    connect(stash, "spotify")
+    web.post("/api/playlists/accounts/spotify/sync")   # Chill (pl1), Not mine (pl2)
+    con = db.connect()
+    c = Ctx(con, con.execute("SELECT * FROM users WHERE username='tester'").fetchone())
+    uid = c.uid
+    # a Stash-only Spotify list of 250 tracks, as a reorganisation script would make it
+    pid = con.execute("INSERT INTO playlists(user_id, service, external_id, name, local) VALUES(?,?,?,?,1)",
+                      (uid, "spotify", "stash:local:sp-moods", "Moods")).lastrowid
+    playlists._store_items(con, pid, [{"item_id": f"{n:022d}", "remote_id": "", "title": f"T{n}", "artist": "A", "duration_ms": 1000,
+                                      "added_at": None, "url": "", "unavailable": 0} for n in range(250)])
+    con.commit()
+    by_name = lambda: {p["name"]: p for p in web.get("/api/playlists").json()["playlists"]}  # noqa: E731
+    assert web.post(f"/api/playlists/lists/{pid}/sync").status_code == 409, "no titles to re-read for a Spotify list"
+    r = web.post(f"/api/playlists/lists/{pid}/publish").json()
+    assert r["pending"] == 250 and r["external_id"] == "pl3" and fake.spotify["pl3"]["name"] == "Moods" and fake.spotify["pl3"]["tracks"] == []
+    moods = by_name()["Moods"]
+    assert not moods["local"] and moods["pending"] == 250 and moods["dirty"]
+    web.post(f"/api/playlists/lists/{by_name()['Chill']['id']}/delete")
+    monkeypatch.setattr(jobs, "SPOTIFY_BATCH", 2)
+    monkeypatch.setattr(jobs, "SPOTIFY_PACE", 0)
+    r = jobs.spotify_push()
+    assert r["ok"] and "2 calls" in r["summary"] and "50 items still pending" in r["summary"] and "0 playlists deleted" in r["summary"], r
+    assert len(fake.spotify["pl3"]["tracks"]) == 200 and fake.spotify["pl3"]["tracks"][0] == f"{0:022d}" and "pl1" in fake.spotify
+    r = jobs.spotify_push()
+    assert "1 playlists complete" in r["summary"] and "1 playlists deleted" in r["summary"], r
+    assert len(fake.spotify["pl3"]["tracks"]) == 250 and "pl1" not in fake.spotify
+    names = by_name()
+    assert "Chill" not in names and names["Moods"]["pending"] == 0 and not names["Moods"]["dirty"] and names["Moods"]["count"] == 250
     con.close()
 
 

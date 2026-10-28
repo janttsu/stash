@@ -121,6 +121,12 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   addresses are resolved as a handle first, then as a legacy username (`subscriptions._resolve`). A
   *quotaExceeded* 403 from YouTube is
   turned into the rate-limit pause until the next reset (`youtube_quota_reset`, midnight Pacific time).
+  **Spotify** (2026-10-28): `publish()` also makes Stash-only Spotify playlists (`POST /me/playlists`), the
+  budgeted push is `_push_spotify_batch` (rename, removals and additions a hundred a call, each call recorded
+  at once), run by the daily `spotify-push` job (`jobs.spotify_push`, `SPOTIFY_BATCH`=60 calls at `SPOTIFY_PACE`
+  1 s, `scripts/systemd/stash-spotify-push.*` at 11:10) through `push_batch(c, budget, "spotify")`. The body
+  of `DELETE /playlists/{id}/items` is sent as `{"uris": [...]}` like the additions; it has not been exercised
+  against the real service yet (the owner's published lists only add). `refresh_local` refuses Spotify lists.
 - **Subscriptions** (`app/subscriptions.py`, `static/js/subscriptions.js`, 2026-10-27): uses Playlists'
   connections, HTTP client (`_api`, retries) and progress record (key `(uid, "<service>:subscriptions")`).
   Tested against fakes (`tests/mcp/test_subscriptions.py`), not yet against the real services. Spotify's

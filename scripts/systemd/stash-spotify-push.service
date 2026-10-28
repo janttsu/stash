@@ -1,0 +1,10 @@
+# Stash: send the day's batch of pending Spotify playlist changes (a published playlist's tracks, removals,
+# renames, deletions of playlists marked for it), a few calls a day so that Spotify never pauses the app.
+[Unit]
+Description=Stash: push pending playlist changes to Spotify
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/stash
+Environment=PATH=%h/stash/.venv/bin:/usr/bin:/bin
+ExecStart=%h/stash/.venv/bin/python -m app.cli job spotify-push

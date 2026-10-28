@@ -172,6 +172,7 @@ missing, disabled or failing), every page shows administrators a warning, and Se
 | `backup` (`scripts/backup.sh`) | hourly | the whole database, kept 30 days: the version history (see *Backups* and *Version history*) |
 | `media-sync` (`app.cli job media-sync`) | every 6 hours | fetches every account's playlists and subscriptions from Spotify and YouTube (import only, pushing changes is always the user's own action) and looks up when each YouTube channel last published |
 | `duplicates` (`app.cli job duplicates`) | daily | in every account, tags the later copies of the same address `duplicate` and takes the tag from the oldest copy and from anything that is no longer a duplicate; http and https (and `www.` and a trailing slash) count as the same address |
+| `spotify-push` (`app.cli job spotify-push`) | daily | sends the pending changes of Spotify playlists (the tracks of a published Stash-only playlist a hundred a call, removals, renames) and then the deletions of playlists marked for it, at most 60 calls a run one second apart: Spotify has no daily quota but pauses an app that calls too much, and a pause ends the run until it is over |
 | `youtube-push` (`app.cli job youtube-push`) | daily, after YouTube's quota reset | sends the pending changes of YouTube playlists (the videos of a published Stash-only playlist, removals, renames), then the deletions of playlists marked for it, then the pending subscribes and unsubscribes when the rest of the run's budget covers them, at most 160 writes a run: YouTube charges 50 of its 10 000 daily quota units per write, so a published list of thousands of videos takes weeks, a batch a day, and every write is recorded as soon as it is done |
 
 `media-sync` keeps within the services' limits: it reads the songs of at most 40 changed playlists per account
@@ -203,6 +204,7 @@ If `stash.service` has more environment than its `PATH` (for example `STASH_ORIG
 17 */6 * * * cd ~/stash && .venv/bin/python -m app.cli job media-sync
 40 4 * * *   cd ~/stash && .venv/bin/python -m app.cli job duplicates
 30 10 * * *  cd ~/stash && .venv/bin/python -m app.cli job youtube-push
+10 11 * * *  cd ~/stash && .venv/bin/python -m app.cli job spotify-push
 ```
 
 When YouTube answers that the day's quota is spent (*quotaExceeded*), Stash records a pause until the next
@@ -357,11 +359,13 @@ YouTube, account fetches leave it alone, *Read the titles again* refreshes them,
 again replaces its contents. Both the older Takeout format ("Video Id, Time Added" after a few lines about the
 playlist) and the newer one ("Video ID, Playlist Video Creation Timestamp") are read.
 
-A Stash-only playlist can later become a real one: **Publish to YouTube…** creates it there at once (private)
-and its videos become pending additions. YouTube charges 50 quota units for every video added, removed or
-moved and 10 000 a day, so the scheduled task `youtube-push` adds them in daily batches of about 160 (see
-*Scheduled tasks*); **Push** on the page sends up to 150 at once and refuses more. The playlist page shows how
-many are still pending. The order on YouTube is the order of addition.
+A Stash-only playlist can later become a real one: **Publish to YouTube…** (or **…to Spotify…**) creates it
+there at once (private) and its items become pending additions. YouTube charges 50 quota units for every video
+added, removed or moved and 10 000 a day, so the scheduled task `youtube-push` adds them in daily batches of
+about 160 (see *Scheduled tasks*); **Push** on the page sends up to 150 at once and refuses more. Spotify has
+no daily quota but pauses an app that calls too much, so `spotify-push` sends a few dozen calls a day, a hundred
+tracks each. The playlist page shows how many are still pending. The order on the service is the order of
+addition.
 
 **Synchronise** does both ways for a whole service: it pushes the
 pending changes of every playlist (after asking, and naming them), then fetches everything back; a push that

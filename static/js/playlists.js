@@ -251,7 +251,7 @@ function playlistDetail(d) {
   return h('div', { class: 'pl__detail' },
     h('div', { class: 'row' },
       h('h3', { class: 'grow' }, p.name, ' ', p.local
-        ? h('span', { class: 'muted small' }, t('only in Stash (Google Takeout): changes take effect at once and are not sent to YouTube'))
+        ? h('span', { class: 'muted small' }, t('only in Stash: changes take effect at once and nothing is sent to {service} until it is published', { service: serviceName(p.service) }))
         : h('a', { href: safeHref(p.url), target: '_blank', rel: 'noopener noreferrer', class: 'small' }, t('open on {service}', { service: serviceName(p.service) }))),
       p.editable && h('button', { type: 'button', class: 'btn', onclick: () => renameDialog(p, edit) }, t('Rename…')),
       p.editable && h('button', { type: 'button', class: 'btn', onclick: () => addDialog(p, edit) }, t('Add by link…'))),
@@ -276,13 +276,16 @@ function playlistDetail(d) {
         if (!await confirmBox(t('Drop the pending changes?'), { danger: true, okLabel: t('Drop') })) return;
         await api('POST', `/api/playlists/lists/${p.id}/discard`);
       }) }, t('Discard changes')),
-      !p.dirty && !p.gone && !p.deleting && h('button', { type: 'button', class: 'btn', onclick: () => act(() => api('POST', `/api/playlists/lists/${p.id}/sync`)) },
+      !p.dirty && !p.gone && !p.deleting && !(p.local && p.service === 'spotify') && h('button', { type: 'button', class: 'btn', onclick: () => act(() => api('POST', `/api/playlists/lists/${p.id}/sync`)) },
         p.local ? t('Read the titles again') : t('Fetch again')),
-      p.local && p.service === 'youtube' && h('button', { type: 'button', class: 'btn', onclick: () => act(async () => {
-        if (!await confirmBox(t('Make “{name}” a real YouTube playlist? It is created now (private); its {n} videos are then added by the daily task, about 160 a day, because YouTube charges 50 quota units per video.', { name: p.name, n: d.total }), { okLabel: t('Publish') })) return;
+      p.local && h('button', { type: 'button', class: 'btn', onclick: () => act(async () => {
+        const why = p.service === 'youtube'
+          ? t('Make “{name}” a real YouTube playlist? It is created now (private); its {n} videos are then added by the daily task, about 160 a day, because YouTube charges 50 quota units per video.', { name: p.name, n: d.total })
+          : t('Make “{name}” a real Spotify playlist? It is created now (private); its {n} tracks are then added by the daily task, a few thousand a day, so that Spotify never pauses the app.', { name: p.name, n: d.total });
+        if (!await confirmBox(why, { okLabel: t('Publish') })) return;
         const r = await api('POST', `/api/playlists/lists/${p.id}/publish`);
-        toast(t('Created on YouTube: {n} videos pending', { n: r.pending }));
-      }) }, t('Publish to YouTube…')),
+        toast(t('Created on {service}: {n} items pending', { service: serviceName(p.service), n: r.pending }));
+      }) }, t('Publish to {service}…', { service: serviceName(p.service) })),
       p.editable && !p.local && !p.gone && !p.deleting && h('button', { type: 'button', class: 'btn danger-quiet', onclick: () => act(async () => {
         if (!await confirmBox(t('Delete “{name}” from {service}? It is only marked now, greyed out, and deleted there at the next push or synchronise; nothing is sent until then.', { name: p.name, service: serviceName(p.service) }), { danger: true, okLabel: t('Mark for deletion') })) return;
         await api('POST', `/api/playlists/lists/${p.id}/delete`);

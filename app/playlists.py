@@ -914,6 +914,8 @@ def push(c: Ctx, playlist_id: int, *, track: bool = True, budget: Optional[int] 
         if writes > YOUTUBE_PUSH_MAX:
             raise err(409, f"too_many_writes: {writes} writes would cost {writes * YOUTUBE_WRITE_COST} of YouTube's 10 000"
                            f" daily quota units; the scheduled task youtube-push sends them in daily batches")
+    elif budget is not None:
+        return _push_spotify_batch(c, row, items, budget, track)
     desired = [r for r in items if r["state"] != "removed"]
     changes = {"added": sum(r["state"] == "added" for r in items), "removed": sum(r["state"] == "removed" for r in items),
                "calls": 0}
@@ -1034,21 +1036,71 @@ def _push_youtube_batch(c: Ctx, row, items, budget: int, track: bool) -> dict:
     return {"pushed": done, "failed": failed, "remaining": 0, "complete": True, "fetched": pulled["fetched"]}
 
 
+def _push_spotify_batch(c: Ctx, row, items, budget: int, track: bool) -> dict:
+    """Part of a Spotify push, at most `budget` calls: the rename, then removals and additions a hundred items
+    a call, each call recorded in Stash as soon as it is done. Additions go to the end in order; the reordering
+    of a full push is left out. When nothing is left pending, the playlist is fetched back. Spotify has no
+    daily quota but pauses apps that call too fast, so the scheduled spotify-push keeps to a few calls a day."""
+    api, con, pid, ext = PROVIDERS["spotify"]["api"], c.con, row["id"], row["external_id"]
+    done = {"added": 0, "removed": 0, "calls": 0}
+    with _api(c, "spotify") as http:
+        if row["dirty"] == 2 and done["calls"] < budget:
+            _check("spotify", http.put(f"{api}/playlists/{ext}",
+                                       json={"name": row["name"], "description": row["description"][:300], "public": bool(row["public"])}))
+            done["calls"] += 1
+            with db.tx(con):
+                con.execute("UPDATE playlists SET dirty=1 WHERE id=?", (pid,))
+        removed = [r for r in items if r["state"] == "removed"]
+        for part in db.chunks(removed, 100):
+            if done["calls"] >= budget:
+                break
+            uris = [f"spotify:track:{r['item_id']}" for r in part]
+            _check("spotify", http.request("DELETE", f"{api}/playlists/{ext}/items", json={"uris": uris}))
+            done["calls"] += 1
+            with db.tx(con):
+                con.executemany("DELETE FROM playlist_items WHERE id=?", [(r["id"],) for r in part])
+            done["removed"] += len(part)
+        added = [r for r in items if r["state"] == "added"]
+        for part in db.chunks(added, 100):
+            if done["calls"] >= budget:
+                break
+            uris = [f"spotify:track:{r['item_id']}" for r in part]
+            _check("spotify", http.post(f"{api}/playlists/{ext}/items", json={"uris": uris}))
+            done["calls"] += 1
+            with db.tx(con):
+                con.executemany("UPDATE playlist_items SET state='synced', remote_position=position WHERE id=?", [(r["id"],) for r in part])
+            done["added"] += len(part)
+    remaining = con.execute("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=? AND state<>'synced'", (pid,)).fetchone()[0]
+    remaining += int(con.execute("SELECT dirty FROM playlists WHERE id=?", (pid,)).fetchone()[0] == 2)
+    if remaining:
+        return {"pushed": done, "failed": [], "remaining": remaining, "complete": False, "fetched": 0}
+    with db.tx(con):
+        con.execute("UPDATE playlists SET dirty=0 WHERE id=?", (pid,))
+        _renumber(con, pid)
+    pulled = pull(c, "spotify", pid, force=True, track=track)
+    return {"pushed": done, "failed": [], "remaining": 0, "complete": True, "fetched": pulled["fetched"]}
+
+
 def publish(c: Ctx, playlist_id: int) -> dict:
-    """A Stash-only YouTube playlist becomes one on YouTube: made there now (empty, private unless marked
-    public), its videos pending additions that a push sends: the scheduled youtube-push task does so within
-    YouTube's quota, a batch a day."""
+    """A Stash-only playlist becomes one on its service: made there now (empty, private unless marked public),
+    its items pending additions that a push sends: the scheduled youtube-push and spotify-push tasks do so in
+    daily batches within the services' limits."""
     row = playlist(c, playlist_id)
     if not row["local"]:
         raise err(409, "not_local: this playlist is already on the service")
-    if row["service"] != "youtube":
-        raise err(409, "youtube_only: only Stash-only YouTube playlists are published this way")
-    acc = account(c, "youtube")
-    api = PROVIDERS["youtube"]["api"]
-    with _api(c, "youtube") as http:
-        made = _check("youtube", http.post(f"{api}/playlists", params={"part": "snippet,status"}, json={
-            "snippet": {"title": row["name"], "description": row["description"][:1000]},
-            "status": {"privacyStatus": "public" if row["public"] else "private"}}))
+    service = row["service"]
+    acc = account(c, service)
+    if not acc or not acc["access_token"]:
+        raise err(409, f"not_connected: connect {service} first on the Playlists page")
+    api = PROVIDERS[service]["api"]
+    with _api(c, service) as http:
+        if service == "spotify":
+            made = _check(service, http.post(f"{api}/me/playlists", json={
+                "name": row["name"], "description": row["description"][:300], "public": bool(row["public"])}))
+        else:
+            made = _check(service, http.post(f"{api}/playlists", params={"part": "snippet,status"}, json={
+                "snippet": {"title": row["name"], "description": row["description"][:1000]},
+                "status": {"privacyStatus": "public" if row["public"] else "private"}}))
     con = c.con
     with db.tx(con):
         con.execute("UPDATE playlists SET external_id=?, local=0, dirty=1, owner=?, remote_count=0, snapshot='', synced_at=?"
@@ -1103,13 +1155,15 @@ def adopt(c: Ctx, local_id: int, into_id: int) -> dict:
     return {"id": into_id, "name": new["name"], "kept": len(kept) - added, "removed": removed, "added": added}
 
 
-def push_batch(c: Ctx, budget: int) -> dict:
-    """The scheduled youtube-push: the pending changes of every YouTube playlist, then, once nothing is
-    pending any more, the deletions of the playlists marked for it; at most `budget` writes in all."""
+def push_batch(c: Ctx, budget: int, service: str = "youtube") -> dict:
+    """The scheduled youtube-push and spotify-push: the pending changes of every playlist of the service,
+    then, once nothing is pending any more, the deletions of the playlists marked for it; at most `budget`
+    calls in all (on YouTube every call is a write of 50 quota units)."""
     con = c.con
+    service = _service(service)
     out = {"writes": 0, "pushed": [], "completed": [], "deleted": [], "failed": [], "remaining": 0}
-    rows = con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service='youtube' AND dirty>0 AND editable=1"
-                       " AND gone=0 AND local=0 AND deleting=0 ORDER BY name COLLATE NOCASE", (c.uid,)).fetchall()
+    rows = con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service=? AND dirty>0 AND editable=1"
+                       " AND gone=0 AND local=0 AND deleting=0 ORDER BY name COLLATE NOCASE", (c.uid, service)).fetchall()
     for row in rows:
         if out["writes"] >= budget:
             break
@@ -1120,11 +1174,11 @@ def push_batch(c: Ctx, budget: int) -> dict:
         if r["complete"]:
             out["completed"].append(row["name"])
     out["remaining"] = con.execute(
-        "SELECT COUNT(*) FROM playlist_items i JOIN playlists p ON p.id=i.playlist_id WHERE p.user_id=? AND p.service='youtube'"
-        " AND p.local=0 AND p.deleting=0 AND p.gone=0 AND p.editable=1 AND i.state<>'synced'", (c.uid,)).fetchone()[0]
+        "SELECT COUNT(*) FROM playlist_items i JOIN playlists p ON p.id=i.playlist_id WHERE p.user_id=? AND p.service=?"
+        " AND p.local=0 AND p.deleting=0 AND p.gone=0 AND p.editable=1 AND i.state<>'synced'", (c.uid, service)).fetchone()[0]
     if out["remaining"] == 0:
-        for row in con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service='youtube' AND deleting=1 AND local=0"
-                               " AND editable=1 ORDER BY name COLLATE NOCASE", (c.uid,)).fetchall():
+        for row in con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service=? AND deleting=1 AND local=0"
+                               " AND editable=1 ORDER BY name COLLATE NOCASE", (c.uid, service)).fetchall():
             if out["writes"] >= budget:
                 break
             push(c, row["id"], track=False)
@@ -1249,6 +1303,8 @@ def import_takeout(c: Ctx, files: list[dict]) -> dict:
 def refresh_local(c: Ctx, playlist_id: int) -> dict:
     """Read the titles of a Stash-only playlist's videos from YouTube again."""
     con = c.con
+    if playlist(c, playlist_id)["service"] != "youtube":
+        raise err(409, "local_playlist: a Stash-only Spotify playlist already has its titles; publish it to put it on Spotify")
     rows = con.execute("SELECT item_id, added_at FROM playlist_items WHERE playlist_id=? ORDER BY position, id",
                        (playlist_id,)).fetchall()
     items = _local_items(c, [(r["item_id"], r["added_at"]) for r in rows])

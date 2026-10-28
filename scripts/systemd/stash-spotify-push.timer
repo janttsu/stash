@@ -1,0 +1,9 @@
+[Unit]
+Description=Stash: push pending playlist changes to Spotify daily
+
+[Timer]
+OnCalendar=*-*-* 11:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
