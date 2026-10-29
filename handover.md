@@ -2,7 +2,7 @@
 
 The state of Stash for whoever continues the work: a person or an assistant in a new session. Keep this file
 current: update it in the same commit as any change that affects how the project is run, built or extended.
-Last updated 2026-10-26.
+Last updated 2026-10-29.
 
 ## What this is
 
@@ -125,7 +125,9 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   **Spotify** (2026-10-28): `publish()` also makes Stash-only Spotify playlists (`POST /me/playlists`), the
   budgeted push is `_push_spotify_batch` (rename, removals and additions a hundred a call, each call recorded
   at once), run by the daily `spotify-push` job (`jobs.spotify_push`, `SPOTIFY_BATCH`=60 calls at `SPOTIFY_PACE`
-  1 s, `scripts/systemd/stash-spotify-push.*` at 11:10) through `push_batch(c, budget, "spotify")`. The body
+  1 s, `scripts/systemd/stash-spotify-push.*` at 11:10) through `push_batch(c, budget, "spotify")`; since
+  2026-10-29 it first sends the pending follows/unfollows like `youtube_push` (both through
+  `jobs._subscriptions_first`, up to `SUBSCRIPTION_SHARE`, out of the same budget). The body
   of `DELETE /playlists/{id}/items` is sent as `{"uris": [...]}` like the additions; it has not been exercised
   against the real service yet (the owner's published lists only add). `refresh_local` refuses Spotify lists.
 - **Subscriptions** (`app/subscriptions.py`, `static/js/subscriptions.js`, 2026-10-27): uses Playlists'

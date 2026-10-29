@@ -262,6 +262,24 @@ def test_spotify_artists_and_followed_playlists(api, stash, fake):
     assert web.get("/api/subscriptions/spotify/pending").json()["quota_units"] == 0
 
 
+def test_spotify_push_sends_pending_subscription_changes(api, stash, fake, monkeypatch):
+    """The daily spotify-push sends pending follows and unfollows before the playlists, from the same budget."""
+    from app import jobs
+
+    web = stash["web"]
+    connect(stash, "spotify")
+    web.post("/api/subscriptions/spotify/sync")
+    subs = ids(web, "spotify")
+    web.post("/api/subscriptions/spotify/edit", json={"ops": [{"op": "unsubscribe", "ids": [subs["Not mine"]["id"]]}]})
+    monkeypatch.setattr(jobs, "SPOTIFY_PACE", 0)
+    r = jobs.spotify_push()
+    assert r["ok"] and "1 subscription changes sent" in r["summary"], r
+    assert fake.unfollowed_playlists == {"pl2"} and ids(web, "spotify")["Not mine"]["gone"]
+    assert web.get("/api/subscriptions").json()["stats"]["spotify"]["pending"] == 0
+    r = jobs.spotify_push()
+    assert "subscription" not in r["summary"], "nothing left to send"
+
+
 def test_missing_permission_asks_to_connect_again(api, stash, fake):
     web = stash["web"]
     connect(stash, "spotify")

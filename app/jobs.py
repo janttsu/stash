@@ -13,7 +13,7 @@
     .venv/bin/python -m app.cli job media-sync
     .venv/bin/python -m app.cli job duplicates
     .venv/bin/python -m app.cli job youtube-push
-    .venv/bin/python -m app.cli job spotify-push   # the same for Spotify: SPOTIFY_BATCH calls, one a second
+    .venv/bin/python -m app.cli job spotify-push   # the same for Spotify (follows and unfollows first): SPOTIFY_BATCH calls, one a second
     .venv/bin/python -m app.cli jobs            # when each task last ran, and whether it is overdue
 
 Each run leaves a record in the config table (job:<name>); the web UI warns administrators when a task has not
@@ -171,12 +171,30 @@ def duplicates() -> dict:
         con.close()
 
 
+def _subscriptions_first(c, service: str, budget: int) -> tuple[str, int]:
+    """A push task's pending subscribes and unsubscribes go before its playlists, when there are at most
+    SUBSCRIPTION_SHARE of them (they are few and the user waits for them). Returns the summary's opening and
+    what is left of the budget for the playlists."""
+    from . import subscriptions
+
+    waiting = c.con.execute("SELECT COUNT(*) FROM subscriptions WHERE user_id=? AND service=?"
+                            " AND state IN ('added', 'removed')", (c.uid, service)).fetchone()[0]
+    if not waiting:
+        return "", budget
+    if waiting > SUBSCRIPTION_SHARE:
+        return f"{waiting} subscription changes wait (more than {SUBSCRIPTION_SHARE}: synchronise them from the page); ", budget
+    s = subscriptions.sync(c, service, push=True)
+    line = f"{len(s['pushed'])} subscription changes sent" + (
+        f", {len(s['push_failed'])} refused" if s["push_failed"] else "") + "; "
+    return line, budget - len(s["pushed"]) - len(s["push_failed"])
+
+
 def youtube_push() -> dict:
     """Every account with YouTube connected: up to PUSH_BATCH pending writes (playlists.push_batch). A quota
     that is spent, or a pause YouTube asks for, ends the run without counting as a failure: the next run goes
     on from where this one stopped, since every write is recorded as soon as it is done."""
     from . import main  # noqa: F401
-    from . import playlists, subscriptions
+    from . import playlists
 
     con = db.connect()
     lines, failures = [], 0
@@ -189,18 +207,7 @@ def youtube_push() -> dict:
             c = _users(con, f"SELECT * FROM users WHERE id={int(acc['user_id'])}")[0]
             who = f"{c.user['username']}/youtube"
             try:
-                # pending subscribes and unsubscribes first, up to SUBSCRIPTION_SHARE of the budget (they are
-                # few and the user waits for them); the playlists get the rest
-                waiting = con.execute("SELECT COUNT(*) FROM subscriptions WHERE user_id=? AND service='youtube'"
-                                      " AND state IN ('added', 'removed')", (c.uid,)).fetchone()[0]
-                line, budget = "", PUSH_BATCH
-                if 0 < waiting <= SUBSCRIPTION_SHARE:
-                    s = subscriptions.sync(c, "youtube", push=True)
-                    budget -= len(s["pushed"]) + len(s["push_failed"])
-                    line = f"{len(s['pushed'])} subscription changes sent" + (
-                        f", {len(s['push_failed'])} refused" if s["push_failed"] else "") + "; "
-                elif waiting:
-                    line = f"{waiting} subscription changes wait (more than {SUBSCRIPTION_SHARE}: synchronise them from the page); "
+                line, budget = _subscriptions_first(c, "youtube", PUSH_BATCH)
                 r = playlists.push_batch(c, budget)
                 lines.append(f"{who}: {line}{r['writes']} writes, {len(r['completed'])} playlists complete, {r['remaining']} items"
                              f" still pending, {len(r['deleted'])} playlists deleted"
@@ -224,8 +231,8 @@ def youtube_push() -> dict:
 
 
 def spotify_push() -> dict:
-    """Every account with Spotify connected: up to SPOTIFY_BATCH calls of pending playlist changes
-    (playlists.push_batch), one call a second. Spotify has no daily quota but pauses an app that calls too
+    """Every account with Spotify connected: the pending follows and unfollows first (as in youtube_push),
+    then pending playlist changes (playlists.push_batch) up to SPOTIFY_BATCH calls in all, one call a second. Spotify has no daily quota but pauses an app that calls too
     much, so the batch stays small and a pause ends the run without counting as a failure."""
     from . import main  # noqa: F401
     from . import playlists
@@ -242,8 +249,9 @@ def spotify_push() -> dict:
             c = _users(con, f"SELECT * FROM users WHERE id={int(acc['user_id'])}")[0]
             who = f"{c.user['username']}/spotify"
             try:
-                r = playlists.push_batch(c, SPOTIFY_BATCH, "spotify")
-                lines.append(f"{who}: {r['writes']} calls, {len(r['completed'])} playlists complete, {r['remaining']} items"
+                line, budget = _subscriptions_first(c, "spotify", SPOTIFY_BATCH)
+                r = playlists.push_batch(c, budget, "spotify")
+                lines.append(f"{who}: {line}{r['writes']} calls, {len(r['completed'])} playlists complete, {r['remaining']} items"
                              f" still pending, {len(r['deleted'])} playlists deleted")
             except playlists.ServiceError as e:
                 code = playlists.problem_code(c, e)
