@@ -2,7 +2,7 @@
 
 The state of Stash for whoever continues the work: a person or an assistant in a new session. Keep this file
 current: update it in the same commit as any change that affects how the project is run, built or extended.
-Last updated 2026-10-29.
+Last updated 2026-11-02.
 
 ## What this is
 
@@ -116,7 +116,9 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   fetch back when complete; a 4xx for one video drops it and reports it, a 5xx ends the batch with the video
   still pending: the first real run met a passing 503 from YouTube). `push_batch(c, budget)` is what the daily `youtube-push` job runs
   (`jobs.youtube_push`, `PUSH_BATCH`=160, `scripts/systemd/stash-youtube-push.*` at 10:30): dirty playlists
-  first, then the deletions of marked playlists once nothing is pending; `jobs.youtube_push` sends the pending
+  first, the budget shared evenly between them with what a finished one leaves going round again (since
+  2026-11-02; before, the playlists went one at a time by name and the published lists at the end of the
+  alphabet waited weeks for their first video), then the deletions of marked playlists once nothing is pending; `jobs.youtube_push` sends the pending
   subscribes/unsubscribes before that, up to `SUBSCRIPTION_SHARE` (the first design sent them only when the
   playlist batch left room, which never happened while thousands of videos were pending). `/c/<name>` and `/user/<name>`
   addresses are resolved as a handle first, then as a legacy username (`subscriptions._resolve`). A

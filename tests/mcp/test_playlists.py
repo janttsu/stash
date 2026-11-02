@@ -121,9 +121,10 @@ class Fake:
                  "contentDetails": {"duration": "PT3M"}} for v in q["id"].split(",") if v not in self.deleted]})
         if path == "/playlists":
             if request.method == "POST":
-                self.youtube["PL2"] = {"title": body["snippet"]["title"], "description": body["snippet"]["description"],
-                                       "privacy": body["status"]["privacyStatus"], "items": []}
-                return httpx.Response(200, json={"id": "PL2"})
+                new = next(f"PL{n}" for n in range(2, 99) if f"PL{n}" not in self.youtube)
+                self.youtube[new] = {"title": body["snippet"]["title"], "description": body["snippet"]["description"],
+                                     "privacy": body["status"]["privacyStatus"], "items": []}
+                return httpx.Response(200, json={"id": new})
             if request.method == "PUT":
                 self.youtube[body["id"]].update({"title": body["snippet"]["title"], "description": body["snippet"]["description"],
                                                  "privacy": body["status"]["privacyStatus"]})
@@ -413,6 +414,34 @@ def test_publish_in_daily_batches_within_quota(api, stash, fake, monkeypatch):
     names = by_name()
     assert "Mix" not in names and names["Keep"]["pending"] == 0 and not names["Keep"]["dirty"]
     con.close()
+
+
+def test_daily_batch_is_shared_between_playlists(api, stash, fake, monkeypatch):
+    """Every pending playlist moves in each run: the first one by name does not take the whole budget."""
+    from app import jobs
+
+    web = stash["web"]
+    connect(stash, "youtube")
+    web.post("/api/playlists/accounts/youtube/sync")
+    by_name = lambda: {p["name"]: p for p in web.get("/api/playlists").json()["playlists"]}  # noqa: E731
+    videos = lambda name: [v for _, v in fake.youtube[by_name()[name]["url"].rsplit("=", 1)[1]]["items"]]  # noqa: E731
+    for name, first in (("Aaa", 10), ("Bbb", 20)):
+        csv = "Video ID,Playlist Video Creation Timestamp\n" + "".join(
+            f"vidvidvid{n:02d},2026-01-01T00:00:00+00:00\n" for n in range(first, first + 4))
+        web.post("/api/playlists/takeout", json={"files": [{"name": f"{name}-videos.csv", "text": csv}]})
+        assert web.post(f"/api/playlists/lists/{by_name()[name]['id']}/publish").json()["pending"] == 4
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 4)
+    r = jobs.youtube_push()
+    assert r["ok"] and "4 writes" in r["summary"] and "4 items still pending" in r["summary"], r
+    assert videos("Aaa") == ["vidvidvid10", "vidvidvid11"] and videos("Bbb") == ["vidvidvid20", "vidvidvid21"], "two each"
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 3)
+    r = jobs.youtube_push()
+    assert "3 writes" in r["summary"] and "1 items still pending" in r["summary"], r
+    assert len(videos("Aaa")) + len(videos("Bbb")) == 7
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 10)
+    r = jobs.youtube_push()
+    assert "1 writes" in r["summary"] and "0 items still pending" in r["summary"], "the rest of the budget is not wasted or spun"
+    assert videos("Aaa") == [f"vidvidvid{n}" for n in range(10, 14)] and videos("Bbb") == [f"vidvidvid{n}" for n in range(20, 24)]
 
 
 def test_publish_to_spotify_in_batches(api, stash, fake, monkeypatch):

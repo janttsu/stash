@@ -1158,21 +1158,33 @@ def adopt(c: Ctx, local_id: int, into_id: int) -> dict:
 def push_batch(c: Ctx, budget: int, service: str = "youtube") -> dict:
     """The scheduled youtube-push and spotify-push: the pending changes of every playlist of the service,
     then, once nothing is pending any more, the deletions of the playlists marked for it; at most `budget`
-    calls in all (on YouTube every call is a write of 50 quota units)."""
+    calls in all (on YouTube every call is a write of 50 quota units). The budget is shared evenly between
+    the pending playlists, so that every one of them moves each run instead of the first ones by name taking
+    all of it; what a finished playlist leaves unused goes round again to the others."""
     con = c.con
     service = _service(service)
     out = {"writes": 0, "pushed": [], "completed": [], "deleted": [], "failed": [], "remaining": 0}
-    rows = con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service=? AND dirty>0 AND editable=1"
-                       " AND gone=0 AND local=0 AND deleting=0 ORDER BY name COLLATE NOCASE", (c.uid, service)).fetchall()
-    for row in rows:
-        if out["writes"] >= budget:
-            break
-        r = push(c, row["id"], track=False, budget=budget - out["writes"])
-        out["writes"] += r["pushed"]["calls"]
-        out["pushed"].append(row["name"])
-        out["failed"] += [{"playlist": row["name"], **f} for f in r["failed"]]
-        if r["complete"]:
-            out["completed"].append(row["name"])
+    active = con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service=? AND dirty>0 AND editable=1"
+                         " AND gone=0 AND local=0 AND deleting=0 ORDER BY name COLLATE NOCASE", (c.uid, service)).fetchall()
+    while active and out["writes"] < budget:
+        share = max(1, (budget - out["writes"]) // len(active))
+        before, still = out["writes"], []
+        for row in active:
+            if out["writes"] >= budget:
+                still.append(row)
+                continue
+            r = push(c, row["id"], track=False, budget=min(share, budget - out["writes"]))
+            out["writes"] += r["pushed"]["calls"]
+            if row["name"] not in out["pushed"]:
+                out["pushed"].append(row["name"])
+            out["failed"] += [{"playlist": row["name"], **f} for f in r["failed"]]
+            if r["complete"]:
+                out["completed"].append(row["name"])
+            else:
+                still.append(row)
+        if out["writes"] == before:
+            break   # nothing could be sent this round: do not spin
+        active = still
     out["remaining"] = con.execute(
         "SELECT COUNT(*) FROM playlist_items i JOIN playlists p ON p.id=i.playlist_id WHERE p.user_id=? AND p.service=?"
         " AND p.local=0 AND p.deleting=0 AND p.gone=0 AND p.editable=1 AND i.state<>'synced'", (c.uid, service)).fetchone()[0]
