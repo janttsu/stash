@@ -400,7 +400,8 @@ For YouTube, everything happens in one Google Cloud project:
 4. Create a client of type **Web application** with the redirect URI. A *Desktop app* client (a JSON file with
    `"installed"` and `http://localhost`) is the wrong kind: Google would send you back to your own computer.
 
-A Google app in *Testing* ends its connection after seven days; press **Connect again…** then. YouTube's default
+A Google app in *Testing* ends its connection after seven days; press **Connect again…** then (only the first
+connection fetches every playlist at once; after connecting again the scheduled fetch carries on). YouTube's default
 quota is 10 000 units a day and every added, removed or moved item costs about 50; fetching is cheap. Spotify
 playlists are pushed as a whole in one or two calls.
 

@@ -1434,7 +1434,10 @@ def web_callback(service: str, request: Request, code: str = "", state: str = ""
         if problem.startswith("youtube_api_disabled"):
             return RedirectResponse(f"/#/playlists?connected={service}&problem={quote(problem)}", status_code=303)
         return RedirectResponse(f"/#/playlists?error={quote(clean_text(f'{e.status} {e.message}', 100))}", status_code=303)
-    return RedirectResponse(f"/#/playlists?connected={service}&fetch=1", status_code=303)
+    # the first connection fetches everything at once; connecting again (a Testing app on Google ends the
+    # connection after seven days) leaves that to the scheduled media-sync, sparing the day's quota
+    fetched = c.con.execute("SELECT 1 FROM playlists WHERE user_id=? AND service=? LIMIT 1", (c.uid, service)).fetchone()
+    return RedirectResponse(f"/#/playlists?connected={service}" + ("" if fetched else "&fetch=1"), status_code=303)
 
 
 @session_api.delete("/accounts/{service}")

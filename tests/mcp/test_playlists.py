@@ -181,7 +181,9 @@ def fake(monkeypatch):
     yield f
 
 
-def connect(stash, service):
+def connect(stash, service, again=False):
+    """Connect through the OAuth flow; the first connection asks the page to fetch everything, connecting
+    again (playlists already fetched) does not."""
     web = stash["web"]
     r = web.post(f"/api/playlists/accounts/{service}/connect", json={"client_id": "cid", "client_secret": "sec"})
     assert r.status_code == 200, r.text
@@ -189,7 +191,8 @@ def connect(stash, service):
     state = parse_qs(url.query)["state"][0]
     assert parse_qs(url.query)["redirect_uri"][0].endswith(f"/api/playlists/accounts/{service}/callback")
     r = web.get(f"/api/playlists/accounts/{service}/callback?code=abc&state={state}", follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == f"/#/playlists?connected={service}&fetch=1", r.text
+    want = f"/#/playlists?connected={service}" + ("" if again else "&fetch=1")
+    assert r.status_code == 303 and r.headers["location"] == want, r.headers.get("location")
     return r
 
 
@@ -204,6 +207,7 @@ def test_connect_and_fetch(api, stash, fake):
     r = web.post("/api/playlists/accounts/spotify/sync").json()
     # someone else's playlist: Spotify (2026) gives no contents, so only its name, owner and size are kept
     assert r["fetched"] == 1 and r["metadata_only"] == ["Not mine"] and r["failed"] == []
+    connect(stash, "spotify", again=True)   # fetched already: no second fetch of everything
     r = web.post("/api/playlists/accounts/youtube/sync").json()
     assert r["fetched"] == 1
     data = web.get("/api/playlists").json()

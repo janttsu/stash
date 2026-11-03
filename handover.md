@@ -100,7 +100,9 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   /me/playlists`, follow/unfollow via `PUT/DELETE /me/library?uris=`. Others' playlists give no contents:
   stored metadata-only (`metadata_only` in the fetch summary). The test fake answers 403 on the removed
   paths. Still to check: a real Spotify push and create, artist follow via /me/library (undocumented),
-  YouTube quota use on a push, and the 7-day end of a *Testing* connection.
+  YouTube quota use on a push. The 7-day end of a *Testing* connection happened on 2026-11-03 (the day's
+  youtube-push failed with "Token has been expired or revoked"; Connect again fixed it); since then the
+  OAuth callback asks the page to fetch everything (`&fetch=1`) only when the service has no playlists yet.
   Tokens are refreshed when expired; a failed refresh asks the user to connect again. Items with no id
   (Spotify local files) are skipped. **Deleting a playlist** (2026-10-27): `playlists.deleting=1`
   (`mark_delete`, `POST /lists/{id}/delete` and `/keep`, MCP `playlist_delete`) greys the list out; `push()` of
