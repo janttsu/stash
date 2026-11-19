@@ -29,10 +29,10 @@ FAVICONS = db.DATA / "favicons"
 ORIGIN = os.environ.get("STASH_ORIGIN", "http://localhost:8003")
 COOKIE = "stash_session"
 SECURE_COOKIE = os.environ.get("STASH_INSECURE_COOKIE") != "1"
-# "Remember this browser": signed in for 30 days from signing in. Otherwise the cookie lasts until the browser
-# closes, and the session ends on the server after 12 hours without use.
-REMEMBER_TTL = 30 * 86400
-BROWSER_TTL = 12 * 3600
+# "Remember this browser": signed in for 60 days from signing in. Otherwise the cookie and the session
+# last 24 hours from signing in.
+REMEMBER_TTL = 60 * 86400
+BROWSER_TTL = 24 * 3600
 # STASH_REGISTRATION fixes who can create an account: invite (the default: an invitation link is needed), open
 # (anyone) or closed. When it is unset, the administrator chooses in Settings → Users and registration and the
 # choice is stored in the database.
@@ -161,11 +161,9 @@ def ctx(request: Request, con=Depends(get_db)) -> Ctx:
         " WHERE s.token_hash=? AND s.expires_at>?", (th, t)).fetchone()
     if not row:
         raise err(401, "not_authenticated")
-    if row["remember"]:  # a fixed 30 days from signing in
-        if t - row["last_seen"] > 3600:
-            con.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (t, th))
-    elif t - row["last_seen"] > 300:  # this browser only: ends after a while without use
-        con.execute("UPDATE sessions SET last_seen=?, expires_at=? WHERE token_hash=?", (t, t + BROWSER_TTL, th))
+    # Both lifetimes are fixed from signing in: 60 days when remembered, otherwise 24 hours.
+    if t - row["last_seen"] > (3600 if row["remember"] else 300):
+        con.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (t, th))
     return Ctx(con, row)
 
 
@@ -195,8 +193,7 @@ def start_session(con, response: Response, user_id: int, remember: bool = True) 
     ttl = REMEMBER_TTL if remember else BROWSER_TTL
     con.execute("INSERT INTO sessions(token_hash, user_id, created_at, last_seen, expires_at, remember)"
                 " VALUES(?,?,?,?,?,?)", (security.token_hash(token), user_id, t, t, t + ttl, int(remember)))
-    # without max_age the browser forgets the cookie when it closes
-    response.set_cookie(COOKIE, token, max_age=REMEMBER_TTL if remember else None, httponly=True,
+    response.set_cookie(COOKIE, token, max_age=ttl, httponly=True,
                         secure=SECURE_COOKIE, samesite="lax", path="/")
 
 

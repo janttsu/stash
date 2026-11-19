@@ -426,6 +426,42 @@ def pending(c: Ctx, service: str) -> dict:
     return out
 
 
+def push_pending(c: Ctx, service: str, budget: int) -> dict:
+    """Send at most `budget` pending subscription changes, subscribes before unsubscribes, each recorded as
+    soon as it is done. Does not fetch. One refusal stays pending and the batch continues; a dead token, a
+    pause or a disabled API stops it. `waiting` is how many changes are still pending afterwards."""
+    service = _service(service)
+    _connected(c, service)
+    done, failed = [], []
+    if budget > 0:
+        rows = c.con.execute(
+            "SELECT * FROM subscriptions WHERE user_id=? AND service=? AND state IN ('added', 'removed')"
+            " ORDER BY CASE state WHEN 'added' THEN 0 ELSE 1 END, title COLLATE NOCASE",
+            (c.uid, service)).fetchall()
+        api = PROVIDERS[service]["api"]
+        with _api(c, service) as http:
+            for r in rows:
+                if len(done) + len(failed) >= budget:
+                    break
+                try:
+                    _write(http, service, api, r)
+                except ServiceError as e:
+                    if e.status in (401, 429) or problem_code(c, e).startswith(("youtube_api_disabled", "reconnect_needed")):
+                        raise
+                    failed.append({"name": r["title"], "action": "subscribe" if r["state"] == "added" else "unsubscribe",
+                                   "error": f"{e.status} {e.message}"[:200]})
+                    continue
+                with db.tx(c.con):
+                    if r["state"] == "removed":
+                        c.con.execute("UPDATE subscriptions SET state='synced', gone=1 WHERE id=?", (r["id"],))
+                    else:
+                        c.con.execute("UPDATE subscriptions SET state='synced' WHERE id=?", (r["id"],))
+                done.append({"name": r["title"], "action": "subscribe" if r["state"] == "added" else "unsubscribe"})
+    waiting = c.con.execute("SELECT COUNT(*) FROM subscriptions WHERE user_id=? AND service=? AND state IN ('added', 'removed')",
+                            (c.uid, service)).fetchone()[0]
+    return {"pushed": done, "push_failed": failed, "waiting": waiting}
+
+
 def sync(c: Ctx, service: str, push: bool = False) -> dict:
     """Fetch, or with push=True first send the pending subscribes and unsubscribes and then fetch. A write that
     fails is listed and stays pending."""

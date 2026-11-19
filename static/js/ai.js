@@ -1,19 +1,18 @@
-// The AI section: everything about assistants and the tools that work with Stash from outside, in one place.
+// The AI block on the Settings page: assistants and the tools that work with Stash from outside.
 // Connecting an assistant (keys, rules), what it can do, the handovers it saves, the changes made with API
 // keys (undoable here), and the Tools: the link check, the browsing history sync, the API, the extension and
 // bookmarklet, import and export.
-import { copyText, fill, h } from './core.js';
+import { copyText, h } from './core.js';
 import { handoverCard } from './handover.js';
 import { t } from './i18n.js';
 import { assistantCard, browsingHistory, changeHistoryCard, linkCheck } from './settings.js';
 
-export async function renderAI(container, params = {}) {
-  container.className = 'view settings ai';
+/** The AI block rendered inside Settings. Old #/ai and #/handovers addresses land here too. */
+export function aiBlocks(params = {}) {
   const tools = h('div', { id: 'ai-tools', class: 'settings-group' },
     h('h2', { class: 'settings-group__title' }, t('Tools')),
     toolsCard(), linkCheck(), browsingHistory(), apiCard());
-  fill(container,
-    h('h1', null, t('AI')),
+  return [
     h('p', { class: 'muted' }, t('An assistant such as Claude Code works on your bookmarks, open tabs, playlists and subscriptions through Stash’s MCP server, in your own words. Here you connect one, keep the rules it follows, read the handovers it saves, undo its changes, and set up the other tools that work with Stash.')),
     h('nav', { class: 'settings-nav' },
       [['ai-assistant', t('Assistant (MCP)')], ['ai-handovers', t('Handovers')], ['ai-changes', t('Changes made with API keys')], ['ai-tools', t('Tools')]]
@@ -23,8 +22,8 @@ export async function renderAI(container, params = {}) {
     canDoCard(),
     params.project ? null : withId('ai-handovers', handoverCard(params)),
     withId('ai-changes', changeHistoryCard()),
-    tools);
-  if (params.section === 'tools') tools.scrollIntoView({ block: 'start' });
+    tools,
+  ];
 }
 
 function withId(id, el) {
@@ -56,7 +55,7 @@ function toolsCard() {
   return h('section', { class: 'card' },
     h('h2', null, t('Tools that work with Stash')),
     h('ul', { class: 'ai__tools' },
-      tool(t('AI assistants (MCP)'), t('Claude Code, Crush, Qwen Code, Gemini CLI and other MCP clients connect with a key.'), '#/ai', t('Connect an assistant')),
+      tool(t('AI assistants (MCP)'), t('Claude Code, Crush, Qwen Code, Gemini CLI and other MCP clients connect with a key.'), '#/settings?section=ai', t('Connect an assistant')),
       tool(t('Link check with a local model'), t('a script on your computer finds bookmarks whose content is gone and tags the rest.'), null, ''),
       tool(t('Browsing history sync'), t('a script sends Firefox’s visit counts, so the assistant knows which bookmarks you use.'), null, ''),
       tool(t('API'), t('your own programs read and change bookmarks at /api/v1 with the same keys.'), null, ''),

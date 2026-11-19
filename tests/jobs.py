@@ -47,6 +47,11 @@ def backup():
 
 
 def main():
+    assert jobs._is_job_failure("rate_limited:youtube:1") is False
+    assert jobs._is_job_failure(
+        "spotify_error: 403 Active premium subscription required for the owner of the app. Try later.") is False
+    assert jobs._is_job_failure("youtube_error: 400 Token has been expired or revoked.") is True
+
     with TestClient(app):
         web = TestClient(app, headers={"X-Stash": "1"})
         other = TestClient(app, headers={"X-Stash": "1"})

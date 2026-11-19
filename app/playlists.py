@@ -418,7 +418,8 @@ def _remote_playlists(http: httpx.Client, service: str, acc) -> list[dict]:
                 out.append({"external_id": p["id"], "name": p.get("name", ""), "description": p.get("description") or "",
                             "public": int(bool(p.get("public"))), "owner": owner,
                             "editable": int(owner == acc["external_id"] or bool(p.get("collaborative"))),
-                            "remote_count": spotify_total(p), "snapshot": p.get("snapshot_id", "")})
+                            "remote_count": spotify_total(p), "snapshot": p.get("snapshot_id", ""),
+                            "published_at": None})
             url = data.get("next")
         return out
     token = None
@@ -432,7 +433,8 @@ def _remote_playlists(http: httpx.Client, service: str, acc) -> list[dict]:
                         "description": p["snippet"].get("description", ""),
                         "public": int(p.get("status", {}).get("privacyStatus") == "public"),
                         "owner": p["snippet"].get("channelId", ""), "editable": 1,
-                        "remote_count": p.get("contentDetails", {}).get("itemCount", 0), "snapshot": p.get("etag", "")})
+                        "remote_count": p.get("contentDetails", {}).get("itemCount", 0), "snapshot": p.get("etag", ""),
+                        "published_at": _iso_time(p["snippet"].get("publishedAt"))})
         token = data.get("nextPageToken")
         if not token:
             break
@@ -587,6 +589,8 @@ def _pull(c: Ctx, service: str, acc, key, playlist_id: Optional[int], force: boo
                                   "remote_count": it.get("contentDetails", {}).get("itemCount", 0), "snapshot": it.get("etag", "")}
         else:
             wanted = _remote_playlists(http, service, acc)
+            if budget is not None:
+                wanted = _read_order(con, c.uid, service, wanted)
         seen = set()
         _set_progress(key, total=len(wanted))
         for n, p in enumerate(wanted):
@@ -891,7 +895,8 @@ def _delete_remote(c: Ctx, row) -> dict:
     return {"deleted": row["name"], "pushed": {"added": 0, "removed": 0, "calls": 1}, "fetched": 0}
 
 
-def push(c: Ctx, playlist_id: int, *, track: bool = True, budget: Optional[int] = None) -> dict:
+def push(c: Ctx, playlist_id: int, *, track: bool = True, budget: Optional[int] = None,
+         only: Optional[Literal["added", "removed"]] = None) -> dict:
     """Make the service's playlist match the local one (items, order, name), then fetch it back. A playlist
     marked for deletion is deleted from the service instead. YouTube charges 50 quota units per write, so a
     push of more than YOUTUBE_PUSH_MAX writes is refused unless a budget is given: then at most that many
@@ -910,12 +915,12 @@ def push(c: Ctx, playlist_id: int, *, track: bool = True, budget: Optional[int] 
         writes = (sum(1 for r in items if r["state"] == "removed" and r["remote_id"])
                   + sum(1 for r in items if r["state"] == "added") + int(row["dirty"] == 2))
         if budget is not None:
-            return _push_youtube_batch(c, row, items, budget, track)
+            return _push_youtube_batch(c, row, items, budget, track, only)
         if writes > YOUTUBE_PUSH_MAX:
             raise err(409, f"too_many_writes: {writes} writes would cost {writes * YOUTUBE_WRITE_COST} of YouTube's 10 000"
                            f" daily quota units; the scheduled task youtube-push sends them in daily batches")
     elif budget is not None:
-        return _push_spotify_batch(c, row, items, budget, track)
+        return _push_spotify_batch(c, row, items, budget, track, only)
     desired = [r for r in items if r["state"] != "removed"]
     changes = {"added": sum(r["state"] == "added" for r in items), "removed": sum(r["state"] == "removed" for r in items),
                "calls": 0}
@@ -973,58 +978,89 @@ def push(c: Ctx, playlist_id: int, *, track: bool = True, budget: Optional[int] 
     return {"pushed": changes, "fetched": pulled["fetched"]}
 
 
-def _push_youtube_batch(c: Ctx, row, items, budget: int, track: bool) -> dict:
+def _by_added(items, state: str, *, newest_first: bool) -> list:
+    """Pending rows of one state. Additions go newest first (same add time keeps the list order, which is how
+    a list sorted by publish date stays newest-first). Removals go oldest first, so a short budget takes away
+    the old copies and leaves the newer videos."""
+    rows = [r for r in items if r["state"] == state]
+
+    def key(r):
+        missing = r["added_at"] is None
+        when = -(r["added_at"] or 0) if newest_first else (r["added_at"] or 0)
+        return (missing, when, r["position"], r["id"])
+
+    return sorted(rows, key=key)
+
+
+def _read_order(con, uid: int, service: str, wanted: list[dict]) -> list[dict]:
+    """Which playlists a budgeted fetch reads first. Lists Stash does not have yet come first, the newest
+    published first (YouTube's playlist date; Spotify's list has none). Lists already stored follow, the one
+    fetched longest ago first, so the read budget still walks the whole library instead of re-reading only
+    the newest ones."""
+    known = {r["external_id"]: r["synced_at"] for r in con.execute(
+        "SELECT external_id, synced_at FROM playlists WHERE user_id=? AND service=?", (uid, service))}
+
+    def key(p):
+        published = p.get("published_at") or 0
+        synced = known.get(p["external_id"])
+        if synced is None and p["external_id"] not in known:
+            return (0, -published, p["name"].casefold())
+        return (1, synced or 0, -published)
+
+    return sorted(wanted, key=key)
+
+
+def _push_youtube_batch(c: Ctx, row, items, budget: int, track: bool, only: Optional[str] = None) -> dict:
     """Part of a YouTube push: up to `budget` writes, each recorded in Stash as soon as it is done, so that a
-    run cut short (the quota, a failure) loses nothing. First the rename, then the removals, then the
-    additions in order, each at the end of the playlist: the order on YouTube is the order of addition, and the
-    reordering a full push does is left out. A video YouTube refuses (deleted, private: a 4xx for that video)
-    is dropped from the list and reported; a passing failure (5xx) ends the batch with the video still pending.
-    When nothing is left pending, the playlist is fetched back."""
+    run cut short (the quota, a failure) loses nothing. First the rename, then the newest additions, then the
+    oldest removals. only="added" or only="removed" sends just that half, so a scheduled run can finish every
+    playlist's additions before anyone's removals. Additions go to the end of the playlist, so the first one
+    sent ends up above the later ones. The reordering a full push does is left out. A video YouTube refuses
+    (deleted, private: a 4xx for that video) is dropped from the list and reported; a passing failure (5xx)
+    ends the batch with the video still pending. When nothing is left pending, the playlist is fetched back."""
     api, con, pid = PROVIDERS["youtube"]["api"], c.con, row["id"]
     done, failed = {"added": 0, "removed": 0, "calls": 0}, []
     with _api(c, "youtube") as http:
-        if row["dirty"] == 2 and done["calls"] < budget:
+        if only != "removed" and row["dirty"] == 2 and done["calls"] < budget:
             _check("youtube", http.put(f"{api}/playlists", params={"part": "snippet,status"}, json={
                 "id": row["external_id"], "snippet": {"title": row["name"], "description": row["description"]},
                 "status": {"privacyStatus": "public" if row["public"] else "private"}}))
             done["calls"] += 1
             with db.tx(con):
                 con.execute("UPDATE playlists SET dirty=1 WHERE id=?", (pid,))
-        for r in items:
-            if r["state"] != "removed":
-                continue
-            if r["remote_id"]:
+        if only != "removed":
+            for r in _by_added(items, "added", newest_first=True):
                 if done["calls"] >= budget:
                     break
-                _check("youtube", http.delete(f"{api}/playlistItems", params={"id": r["remote_id"]}))
+                try:
+                    made = _check("youtube", http.post(f"{api}/playlistItems", params={"part": "snippet"}, json={
+                        "snippet": {"playlistId": row["external_id"],
+                                    "resourceId": {"kind": "youtube#video", "videoId": r["item_id"]}}}))
+                except ServiceError as e:
+                    # only YouTube's own refusal of the video (not found, private, forbidden) drops it; a dead token,
+                    # the quota, a disabled API or a passing 5xx ends the batch and the video stays pending
+                    if e.status >= 500 or e.status in (401, 429) or problem_code(c, e).startswith("youtube_api_disabled"):
+                        raise
+                    done["calls"] += 1
+                    failed.append({"title": r["title"], "error": f"{e.status} {e.message}"[:200]})
+                    with db.tx(con):
+                        con.execute("DELETE FROM playlist_items WHERE id=?", (r["id"],))
+                    continue
                 done["calls"] += 1
-            with db.tx(con):
-                con.execute("DELETE FROM playlist_items WHERE id=?", (r["id"],))
-            done["removed"] += 1
-        for r in items:
-            if r["state"] != "added":
-                continue
-            if done["calls"] >= budget:
-                break
-            try:
-                made = _check("youtube", http.post(f"{api}/playlistItems", params={"part": "snippet"}, json={
-                    "snippet": {"playlistId": row["external_id"],
-                                "resourceId": {"kind": "youtube#video", "videoId": r["item_id"]}}}))
-            except ServiceError as e:
-                # only YouTube's own refusal of the video (not found, private, forbidden) drops it; a dead token,
-                # the quota, a disabled API or a passing 5xx ends the batch and the video stays pending
-                if e.status >= 500 or e.status in (401, 429) or problem_code(c, e).startswith("youtube_api_disabled"):
-                    raise
-                done["calls"] += 1
-                failed.append({"title": r["title"], "error": f"{e.status} {e.message}"[:200]})
+                with db.tx(con):
+                    con.execute("UPDATE playlist_items SET state='synced', remote_id=?, remote_position=position WHERE id=?",
+                                (made.get("id", f"new-{r['id']}"), r["id"]))
+                done["added"] += 1
+        if only != "added":
+            for r in _by_added(items, "removed", newest_first=False):
+                if r["remote_id"] and done["calls"] >= budget:
+                    break
+                if r["remote_id"]:
+                    _check("youtube", http.delete(f"{api}/playlistItems", params={"id": r["remote_id"]}))
+                    done["calls"] += 1
                 with db.tx(con):
                     con.execute("DELETE FROM playlist_items WHERE id=?", (r["id"],))
-                continue
-            done["calls"] += 1
-            with db.tx(con):
-                con.execute("UPDATE playlist_items SET state='synced', remote_id=?, remote_position=position WHERE id=?",
-                            (made.get("id", f"new-{r['id']}"), r["id"]))
-            done["added"] += 1
+                done["removed"] += 1
     remaining = con.execute("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=? AND state<>'synced'", (pid,)).fetchone()[0]
     remaining += int(con.execute("SELECT dirty FROM playlists WHERE id=?", (pid,)).fetchone()[0] == 2)
     if remaining:
@@ -1036,40 +1072,44 @@ def _push_youtube_batch(c: Ctx, row, items, budget: int, track: bool) -> dict:
     return {"pushed": done, "failed": failed, "remaining": 0, "complete": True, "fetched": pulled["fetched"]}
 
 
-def _push_spotify_batch(c: Ctx, row, items, budget: int, track: bool) -> dict:
-    """Part of a Spotify push, at most `budget` calls: the rename, then removals and additions a hundred items
-    a call, each call recorded in Stash as soon as it is done. Additions go to the end in order; the reordering
-    of a full push is left out. When nothing is left pending, the playlist is fetched back. Spotify has no
-    daily quota but pauses apps that call too fast, so the scheduled spotify-push keeps to a few calls a day."""
+def _push_spotify_batch(c: Ctx, row, items, budget: int, track: bool, only: Optional[str] = None) -> dict:
+    """Part of a Spotify push, at most `budget` calls: the rename, then the newest additions and the oldest
+    removals, a hundred items a call, each call recorded in Stash as soon as it is done. only="added" or
+    only="removed" sends just that half, so a scheduled run finishes every playlist's additions before any
+    removal. Additions go to the end, newest first. The reordering of a full push is left out. When nothing
+    is left pending, the playlist is fetched back. Spotify has no daily quota but pauses apps that call too
+    fast, so the scheduled spotify-push keeps to a few calls a day."""
     api, con, pid, ext = PROVIDERS["spotify"]["api"], c.con, row["id"], row["external_id"]
     done = {"added": 0, "removed": 0, "calls": 0}
     with _api(c, "spotify") as http:
-        if row["dirty"] == 2 and done["calls"] < budget:
+        if only != "removed" and row["dirty"] == 2 and done["calls"] < budget:
             _check("spotify", http.put(f"{api}/playlists/{ext}",
                                        json={"name": row["name"], "description": row["description"][:300], "public": bool(row["public"])}))
             done["calls"] += 1
             with db.tx(con):
                 con.execute("UPDATE playlists SET dirty=1 WHERE id=?", (pid,))
-        removed = [r for r in items if r["state"] == "removed"]
-        for part in db.chunks(removed, 100):
-            if done["calls"] >= budget:
-                break
-            uris = [f"spotify:track:{r['item_id']}" for r in part]
-            _check("spotify", http.request("DELETE", f"{api}/playlists/{ext}/items", json={"uris": uris}))
-            done["calls"] += 1
-            with db.tx(con):
-                con.executemany("DELETE FROM playlist_items WHERE id=?", [(r["id"],) for r in part])
-            done["removed"] += len(part)
-        added = [r for r in items if r["state"] == "added"]
-        for part in db.chunks(added, 100):
-            if done["calls"] >= budget:
-                break
-            uris = [f"spotify:track:{r['item_id']}" for r in part]
-            _check("spotify", http.post(f"{api}/playlists/{ext}/items", json={"uris": uris}))
-            done["calls"] += 1
-            with db.tx(con):
-                con.executemany("UPDATE playlist_items SET state='synced', remote_position=position WHERE id=?", [(r["id"],) for r in part])
-            done["added"] += len(part)
+        removed = _by_added(items, "removed", newest_first=False)
+        added = _by_added(items, "added", newest_first=True)
+        if only != "removed":
+            for part in db.chunks(added, 100):
+                if done["calls"] >= budget:
+                    break
+                uris = [f"spotify:track:{r['item_id']}" for r in part]
+                _check("spotify", http.post(f"{api}/playlists/{ext}/items", json={"uris": uris}))
+                done["calls"] += 1
+                with db.tx(con):
+                    con.executemany("UPDATE playlist_items SET state='synced', remote_position=position WHERE id=?", [(r["id"],) for r in part])
+                done["added"] += len(part)
+        if only != "added":
+            for part in db.chunks(removed, 100):
+                if done["calls"] >= budget:
+                    break
+                uris = [f"spotify:track:{r['item_id']}" for r in part]
+                _check("spotify", http.request("DELETE", f"{api}/playlists/{ext}/items", json={"uris": uris}))
+                done["calls"] += 1
+                with db.tx(con):
+                    con.executemany("DELETE FROM playlist_items WHERE id=?", [(r["id"],) for r in part])
+                done["removed"] += len(part)
     remaining = con.execute("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=? AND state<>'synced'", (pid,)).fetchone()[0]
     remaining += int(con.execute("SELECT dirty FROM playlists WHERE id=?", (pid,)).fetchone()[0] == 2)
     if remaining:
@@ -1155,42 +1195,59 @@ def adopt(c: Ctx, local_id: int, into_id: int) -> dict:
     return {"id": into_id, "name": new["name"], "kept": len(kept) - added, "removed": removed, "added": added}
 
 
-def push_batch(c: Ctx, budget: int, service: str = "youtube") -> dict:
+def push_batch(c: Ctx, budget: int, service: str = "youtube",
+               stages: tuple[str, ...] = ("added", "removed", "delete")) -> dict:
     """The scheduled youtube-push and spotify-push: the pending changes of every playlist of the service,
     then, once nothing is pending any more, the deletions of the playlists marked for it; at most `budget`
-    calls in all (on YouTube every call is a write of 50 quota units). The budget is shared evenly between
-    the pending playlists, so that every one of them moves each run instead of the first ones by name taking
-    all of it; what a finished playlist leaves unused goes round again to the others."""
+    calls in all (on YouTube every call is a write of 50 quota units). Additions on every playlist go before
+    any removal. On YouTube, Katsottavaksi myöhemmin takes the additions first and keeps them until its
+    pending additions are done; then the playlist with the newest video still waiting to be added. Removals
+    start only when no addition is left, in that same playlist order, oldest video first inside a list. What
+    a finished playlist leaves goes to the next. Deletions of whole playlists, when nothing else is pending,
+    start from the newest list. `stages` limits the run to "added", "removed" and "delete", so the scheduled
+    task can bring subscriptions up to date before any removal."""
     con = c.con
     service = _service(service)
     out = {"writes": 0, "pushed": [], "completed": [], "deleted": [], "failed": [], "remaining": 0}
-    active = con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service=? AND dirty>0 AND editable=1"
-                         " AND gone=0 AND local=0 AND deleting=0 ORDER BY name COLLATE NOCASE", (c.uid, service)).fetchall()
-    while active and out["writes"] < budget:
-        share = max(1, (budget - out["writes"]) // len(active))
-        before, still = out["writes"], []
-        for row in active:
+
+    def ordered():
+        return con.execute(
+            "SELECT p.id, p.name, p.dirty,"
+            " (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id AND i.state='added') AS adds,"
+            " (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id AND i.state='removed') AS removes,"
+            " (SELECT MAX(i.added_at) FROM playlist_items i WHERE i.playlist_id=p.id AND i.state='added') AS newest_add,"
+            " (SELECT MAX(i.added_at) FROM playlist_items i WHERE i.playlist_id=p.id AND i.state='removed') AS newest_remove"
+            " FROM playlists p WHERE p.user_id=? AND p.service=? AND p.dirty>0 AND p.editable=1"
+            " AND p.gone=0 AND p.local=0 AND p.deleting=0"
+            " ORDER BY CASE WHEN p.name='Katsottavaksi myöhemmin' THEN 0 ELSE 1 END,"
+            " newest_add IS NULL, newest_add DESC, newest_remove IS NULL, newest_remove DESC, p.id DESC",
+            (c.uid, service)).fetchall()
+
+    def send(only: Literal["added", "removed"]) -> None:
+        for row in ordered():
             if out["writes"] >= budget:
-                still.append(row)
+                return
+            if only == "added" and not row["adds"] and row["dirty"] != 2:
                 continue
-            r = push(c, row["id"], track=False, budget=min(share, budget - out["writes"]))
+            if only == "removed" and not row["removes"]:
+                continue
+            r = push(c, row["id"], track=False, budget=budget - out["writes"], only=only)
             out["writes"] += r["pushed"]["calls"]
-            if row["name"] not in out["pushed"]:
-                out["pushed"].append(row["name"])
+            out["pushed"].append(row["name"])
             out["failed"] += [{"playlist": row["name"], **f} for f in r["failed"]]
             if r["complete"]:
                 out["completed"].append(row["name"])
-            else:
-                still.append(row)
-        if out["writes"] == before:
-            break   # nothing could be sent this round: do not spin
-        active = still
+
+    if "added" in stages:
+        send("added")
+    if "removed" in stages and out["writes"] < budget:
+        send("removed")
     out["remaining"] = con.execute(
         "SELECT COUNT(*) FROM playlist_items i JOIN playlists p ON p.id=i.playlist_id WHERE p.user_id=? AND p.service=?"
         " AND p.local=0 AND p.deleting=0 AND p.gone=0 AND p.editable=1 AND i.state<>'synced'", (c.uid, service)).fetchone()[0]
-    if out["remaining"] == 0:
+    if "delete" in stages and out["remaining"] == 0:
         for row in con.execute("SELECT id, name FROM playlists WHERE user_id=? AND service=? AND deleting=1 AND local=0"
-                               " AND editable=1 ORDER BY name COLLATE NOCASE", (c.uid, service)).fetchall():
+                               " AND editable=1 ORDER BY id DESC", (c.uid, service)).fetchall():
             if out["writes"] >= budget:
                 break
             push(c, row["id"], track=False)

@@ -331,7 +331,7 @@ try {
   // --- settings ---
   await goto('/#/settings');
   await js(HELPERS);
-  await until(`document.querySelectorAll('.settings .card').length === 10 && !!$t('.settings h2', 'Users and registration')`, 'ten settings cards incl. admin');
+  await until(`document.querySelectorAll('.settings .card').length === 16 && !!$t('.settings h2', 'Users and registration') && !!$t('.settings-group__title', 'AI')`, 'settings cards, including AI');
   // API key: created in a dialog, shown once, listed by its prefix, then revoked
   // the assistant (MCP) card: instructions, the address, and connecting an assistant makes a key with a ready setup
   await until(`!!$t('.settings h3', 'How to use it') && $t('.settings h3', 'How to use it').nextElementSibling.children.length === 4`, 'MCP instructions');

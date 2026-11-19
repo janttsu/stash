@@ -1,4 +1,5 @@
 // Settings: appearance, add-to-Stash buttons, import/export, account security and (for admins) users.
+import { aiBlocks } from './ai.js';
 import { api, applyTheme, attempt, fill, confirmBox, copyText, fmtDate, h, openModal, state, toast } from './core.js';
 import { exportBookmarks, importDialog } from './bookmarks.js';
 import { setLang, t } from './i18n.js';
@@ -11,11 +12,8 @@ export async function renderSettings(container, params = {}) {
   const groups = [
     group(t('Look and behaviour'), appearance(), behaviour(), addButtons()),
     group(t('Bookmarks'), importExport()),
-    group(t('Assistants, tools and API'), h('section', { class: 'card' },
-      h('p', null, t('Everything that works with Stash from outside is in the AI section: connecting an assistant (MCP) with its keys and rules, the link check with a local model, the browsing history sync, the API for your own programs, the handovers assistants save and the changes they made.')),
-      h('div', { class: 'row' },
-        h('a', { class: 'btn', href: '#/ai' }, t('Open the AI section')),
-        h('a', { class: 'btn', href: '#/ai?section=tools' }, t('Tools'))))),
+    { title: t('AI'), el: h('section', { class: 'settings-group', id: 'settings-ai' },
+      h('h2', { class: 'settings-group__title' }, t('AI')), ...aiBlocks(params)) },
     group(t('Version history'), versionHistory()),
     group(t('Account'), account()),
   ];
@@ -29,8 +27,9 @@ export async function renderSettings(container, params = {}) {
   const nav = h('nav', { class: 'settings-nav' }, groups.map(({ title, el }) =>
     h('button', { type: 'button', class: 'linklike', onclick: () => el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, title)));
   fill(root, h('h1', null, t('Settings')), nav, ...groups.map((g) => g.el));
-  // #/settings?section=add or =import: links from the AI page's tool list jump straight to the card
-  if (params.section) document.getElementById(`settings-${params.section}`)?.scrollIntoView({ block: 'start' });
+  // #/settings?section=add, =import, =ai or =tools: links jump straight to that part
+  const jump = params.section === 'tools' ? 'ai-tools' : params.section ? `settings-${params.section}` : '';
+  if (jump) document.getElementById(jump)?.scrollIntoView({ block: 'start' });
   if (adminCard) await drawAdmin(adminCard, jobsCard);
 }
 

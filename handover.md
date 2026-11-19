@@ -2,16 +2,16 @@
 
 The state of Stash for whoever continues the work: a person or an assistant in a new session. Keep this file
 current: update it in the same commit as any change that affects how the project is run, built or extended.
-Last updated 2026-11-02.
+Last updated 2026-11-19.
 
 ## What this is
 
 A self-hosted bookmark manager (FastAPI + SQLite + plain ES modules, no build step) with an MCP server for AI
-assistants. The top bar has six sections: **Dashboard**, **My Bookmarks**, **Open tabs** (a browser's open
+assistants. The top bar has five sections: **Dashboard**, **My Bookmarks**, **Open tabs** (a browser's open
 tabs sent here to be sorted out later), **Playlists** (Spotify and YouTube playlists copied in, edited as pending
-changes, pushed back), **Subscriptions** (YouTube channels, Spotify followed artists and playlists, with tags,
-notes and pending subscribe/unsubscribe) and **AI** (`static/js/ai.js`: connecting an assistant with keys and rules, the versioned
-**Handovers** assistants save over MCP, and the undoable changes made with API keys). Settings keeps the rest.
+changes, pushed back) and **Subscriptions** (YouTube channels, Spotify followed artists and playlists, with tags,
+notes and pending subscribe/unsubscribe). **AI** (`static/js/ai.js`: connecting an assistant with keys and rules, the versioned
+**Handovers** assistants save over MCP, and the undoable changes made with API keys) is a section of Settings.
 README.md describes every feature for users; this file is about the work.
 
 ## Where it runs
@@ -117,21 +117,20 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   `_push_youtube_batch` (rename, removals, additions appended in order, each recorded at once, no reordering,
   fetch back when complete; a 4xx for one video drops it and reports it, a 5xx ends the batch with the video
   still pending: the first real run met a passing 503 from YouTube). `push_batch(c, budget)` is what the daily `youtube-push` job runs
-  (`jobs.youtube_push`, `PUSH_BATCH`=160, `scripts/systemd/stash-youtube-push.*` at 10:30): dirty playlists
-  first, the budget shared evenly between them with what a finished one leaves going round again (since
-  2026-11-02; before, the playlists went one at a time by name and the published lists at the end of the
-  alphabet waited weeks for their first video), then the deletions of marked playlists once nothing is pending; `jobs.youtube_push` sends the pending
-  subscribes/unsubscribes before that, up to `SUBSCRIPTION_SHARE` (the first design sent them only when the
-  playlist batch left room, which never happened while thousands of videos were pending). `/c/<name>` and `/user/<name>`
+  (`jobs.youtube_push`, `PUSH_BATCH`=160, `scripts/systemd/stash-youtube-push.*` at 10:30, through
+  `scripts/youtube-push-daily.sh`, which skips a second run on the same local day): additions first
+  (the playlist named exactly `Katsottavaksi myöhemmin`, then the one with the newest pending addition; that
+  playlist keeps the day's budget until its additions are done), then pending subscription changes
+  (`subscriptions.push_pending`, subscribes before unsubscribes), and only when nothing is waiting the video
+  removals and the deletions of marked playlists. `SUBSCRIPTION_SHARE` no longer gates that step. `/c/<name>` and `/user/<name>`
   addresses are resolved as a handle first, then as a legacy username (`subscriptions._resolve`). A
   *quotaExceeded* 403 from YouTube is
   turned into the rate-limit pause until the next reset (`youtube_quota_reset`, midnight Pacific time).
   **Spotify** (2026-10-28): `publish()` also makes Stash-only Spotify playlists (`POST /me/playlists`), the
   budgeted push is `_push_spotify_batch` (rename, removals and additions a hundred a call, each call recorded
   at once), run by the daily `spotify-push` job (`jobs.spotify_push`, `SPOTIFY_BATCH`=60 calls at `SPOTIFY_PACE`
-  1 s, `scripts/systemd/stash-spotify-push.*` at 11:10) through `push_batch(c, budget, "spotify")`; since
-  2026-10-29 it first sends the pending follows/unfollows like `youtube_push` (both through
-  `jobs._subscriptions_first`, up to `SUBSCRIPTION_SHARE`, out of the same budget). The body
+  1 s, `scripts/systemd/stash-spotify-push.*` at 11:10) through the same stage order as YouTube
+  (`jobs._account_push`: additions, then subscription changes, then removals and deletions). The body
   of `DELETE /playlists/{id}/items` is sent as `{"uris": [...]}` like the additions; it has not been exercised
   against the real service yet (the owner's published lists only add). `refresh_local` refuses Spotify lists.
 - **Subscriptions** (`app/subscriptions.py`, `static/js/subscriptions.js`, 2026-10-27): uses Playlists'
@@ -147,7 +146,7 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   2026-10-27): tags are the categories, one topic tag per channel is the intended use. Since 2026-10-27 `media-sync` also runs the activity check in the
   background (`jobs._stale_activity`: channels not checked for `ACTIVITY_EVERY`, at most `ACTIVITY_BATCH`=200
   per account per run, oldest first; `tests/mcp/test_subscriptions.py::test_scheduled_activity_check`).
-- **Handovers** (`app/handover.py`, `static/js/handover.js` as a card on the AI page): done, tests in
+- **Handovers** (`app/handover.py`, `static/js/handover.js` as a card in Settings → AI): done, tests in
   `tests/mcp/test_handover.py`; checked live on production with a throwaway account on 2026-10-26.
 - **Live redraw of every page** (2026-10-27): `users.rev` is bumped by triggers (`db.REV_TRIGGERS`) and open
   pages watch it through `/api/events`; `app.js` `scheduleRedraw()` re-routes any page other than the dashboard
@@ -156,9 +155,10 @@ node --check static/js/<file>.js                 # no bundler, so at least a syn
   `playlist_items`, `subscriptions`, `open_tab_lists`, `open_tabs`, `handovers` and `handover_versions` bump
   it too (`tests/smoke.py`). A fetch of a big playlist bumps it per row, which is at most one redraw per
   `EVENT_POLL`; the busy check in `app.js` still holds a redraw while a dialog is open or a field is focused.
-- **AI section** (`static/js/ai.js`): the assistant card and change history moved here from Settings
-  (`settings.js` exports them as `assistantCard()` and `changeHistoryCard()`); Settings → Assistants and API
-  only points here. `#/handovers` still routes to the AI page.
+- **AI section** (`static/js/ai.js`, since 2026-11-19 under Settings, not in the top bar): `aiBlocks()` is
+  rendered by `renderSettings`. `#/ai` and `#/handovers` still open that part of Settings. Sign-in:
+  "Remember this browser" keeps the session for 60 days; without it the cookie and the session last 24 hours
+  from signing in (`REMEMBER_TTL`, `BROWSER_TTL` in `app/main.py`).
 - **Dashboard "bookmarks fade with disuse"** was added and then reverted on request; the `used_at` column it
   added may still exist in older databases and is unused.
 - The browser extension zip is built by the server from `extension/` on each download; after changing the

@@ -2,7 +2,8 @@
 (or another assistant) can pick the project up later. Every save is a new version; nothing is ever overwritten
 or deleted. This is separate from bookmarks: no changeset, no trash and no undo apply here.
 
-The web UI shows the projects and versions at /#/handovers; `/api/handovers` serves that page with the session
+The web UI shows the projects and versions under Settings (old /#/handovers and /#/ai addresses still open it);
+`/api/handovers` serves that page with the session
 cookie. The MCP tools (handover_save, handover_get, handover_list) go through LocalAPI with an API key.
 """
 from __future__ import annotations

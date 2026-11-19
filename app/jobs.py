@@ -2,18 +2,20 @@
 
   backup        scripts/backup.sh, hourly: the 30-day version history of everything
   media-sync    every 6 hours: fetch every connected account's playlists and subscriptions (import only; pushing
-                changes stays a thing the user starts), in small batches and within the services' limits, and
-                look up when YouTube channels last published, each channel about once a day
+                changes stays a thing the user starts), in small batches and within the services' limits.
+                Playlists Stash does not have yet are read first, the newest published first; the rest are
+                read least-recently-fetched first so the batch still covers the library. YouTube channels
+                are looked up for their newest upload about once a day
   duplicates    daily: tag the later copies of the same address "duplicate", never the oldest one
-  youtube-push  daily, after YouTube's quota reset: the pending changes of YouTube playlists (a published
-                Stash-only playlist's videos, removals, renames), then the deletions of playlists marked
-                for it, after the pending subscribes and unsubscribes that go first (up to SUBSCRIPTION_SHARE);
-                at most PUSH_BATCH writes a run since each costs 50 of the day's 10 000 units
+  youtube-push  daily, after YouTube's quota reset: playlist additions first, then pending
+                subscribes and unsubscribes (subscribes before unsubscribes), and only after those are done
+                the video removals and the deletions of playlists marked for it. Katsottavaksi myöhemmin's
+                additions go first. At most PUSH_BATCH writes a run, each 50 of the day's 10 000 units
 
     .venv/bin/python -m app.cli job media-sync
     .venv/bin/python -m app.cli job duplicates
     .venv/bin/python -m app.cli job youtube-push
-    .venv/bin/python -m app.cli job spotify-push   # the same for Spotify (follows and unfollows first): SPOTIFY_BATCH calls, one a second
+    .venv/bin/python -m app.cli job spotify-push   # the same order for Spotify, additions before removals: SPOTIFY_BATCH calls, one a second
     .venv/bin/python -m app.cli jobs            # when each task last ran, and whether it is overdue
 
 Each run leaves a record in the config table (job:<name>); the web UI warns administrators when a task has not
@@ -38,13 +40,21 @@ JOBS = {
     "spotify-push": (28, "daily batch of playlist changes to Spotify, a few calls a day"),
 }
 PUSH_BATCH = 160             # writes to YouTube per youtube-push run: 8 000 of the day's 10 000 quota units
-SUBSCRIPTION_SHARE = 40      # of those, at most this many may go to pending subscribes and unsubscribes, sent first
+SUBSCRIPTION_SHARE = 40      # kept for older notes; the push now sends subscription changes after additions and before any removal, within the same batch
 SPOTIFY_BATCH = 60           # calls to Spotify per spotify-push run (a hundred tracks each at most)
 SPOTIFY_PACE = 1.0           # seconds between those calls
 PLAYLIST_BATCH = 40          # playlists whose songs are read per account and service in one run
 ACTIVITY_BATCH = 200         # YouTube channels whose newest upload is looked up per account in one run (1 quota unit each)
 ACTIVITY_EVERY = 24 * 3600   # a channel is looked up again after this
 PAUSE_BETWEEN = 5            # seconds between accounts and services, to spread the requests
+
+
+def _is_job_failure(code: str) -> bool:
+    """A pause the service asked for is not a broken timer. Spotify's premium-owner refusal is one of them:
+    it lifts on its own, and the next run tries again. The text stays in the task's summary."""
+    if code.startswith("rate_limited"):
+        return False
+    return "Active premium subscription required for the owner of the app" not in code
 
 
 def record(con, name: str, ok: bool, summary: str) -> None:
@@ -118,7 +128,7 @@ def media_sync() -> dict:
                 except playlists.ServiceError as e:
                     code = playlists.problem_code(c, e)
                     lines.append(f"{who} {label}: {code}")
-                    if not code.startswith("rate_limited"):   # a pause is expected, not a failure of the task
+                    if _is_job_failure(code):
                         failures += 1
                     if e.status == 429:
                         break   # the same app: do not try its subscriptions during the pause either
@@ -171,22 +181,34 @@ def duplicates() -> dict:
         con.close()
 
 
-def _subscriptions_first(c, service: str, budget: int) -> tuple[str, int]:
-    """A push task's pending subscribes and unsubscribes go before its playlists, when there are at most
-    SUBSCRIPTION_SHARE of them (they are few and the user waits for them). Returns the summary's opening and
-    what is left of the budget for the playlists."""
-    from . import subscriptions
+def _account_push(c, service: str, budget: int) -> str:
+    """One account's daily push. Playlist additions take the budget first. Pending subscription changes use
+    what is left, subscribes before unsubscribes. Video removals and playlist deletions run only when no
+    addition and no subscription change is still waiting."""
+    from . import playlists, subscriptions
 
-    waiting = c.con.execute("SELECT COUNT(*) FROM subscriptions WHERE user_id=? AND service=?"
-                            " AND state IN ('added', 'removed')", (c.uid, service)).fetchone()[0]
-    if not waiting:
-        return "", budget
-    if waiting > SUBSCRIPTION_SHARE:
-        return f"{waiting} subscription changes wait (more than {SUBSCRIPTION_SHARE}: synchronise them from the page); ", budget
-    s = subscriptions.sync(c, service, push=True)
-    line = f"{len(s['pushed'])} subscription changes sent" + (
-        f", {len(s['push_failed'])} refused" if s["push_failed"] else "") + "; "
-    return line, budget - len(s["pushed"]) - len(s["push_failed"])
+    who = f"{c.user['username']}/{service}"
+    adds = playlists.push_batch(c, budget, service, stages=("added",))
+    left = budget - adds["writes"]
+    subs = subscriptions.push_pending(c, service, left)
+    sent = len(subs["pushed"]) + len(subs["push_failed"])
+    left -= sent
+    deletes = {"writes": 0, "completed": [], "deleted": [], "failed": [], "remaining": adds["remaining"]}
+    if left and subs["waiting"] == 0:
+        deletes = playlists.push_batch(c, left, service, stages=("removed", "delete"))
+    line = ""
+    if sent or subs["waiting"]:
+        line = f"{len(subs['pushed'])} subscription changes sent" + (
+            f", {len(subs['push_failed'])} refused" if subs["push_failed"] else "")
+        if subs["waiting"]:
+            line += f", {subs['waiting']} subscription changes still pending (deletions wait)"
+        line += "; "
+    writes = adds["writes"] + sent + deletes["writes"]
+    unit = "writes" if service == "youtube" else "calls"
+    failed = adds["failed"] + deletes["failed"]
+    return (f"{who}: {line}{writes} {unit}, {len(adds['completed']) + len(deletes['completed'])} playlists complete, "
+            f"{deletes['remaining']} items still pending, {len(deletes['deleted'])} playlists deleted"
+            + (f", refused by YouTube: {len(failed)}" if service == "youtube" and failed else ""))
 
 
 def youtube_push() -> dict:
@@ -207,15 +229,11 @@ def youtube_push() -> dict:
             c = _users(con, f"SELECT * FROM users WHERE id={int(acc['user_id'])}")[0]
             who = f"{c.user['username']}/youtube"
             try:
-                line, budget = _subscriptions_first(c, "youtube", PUSH_BATCH)
-                r = playlists.push_batch(c, budget)
-                lines.append(f"{who}: {line}{r['writes']} writes, {len(r['completed'])} playlists complete, {r['remaining']} items"
-                             f" still pending, {len(r['deleted'])} playlists deleted"
-                             + (f", refused by YouTube: {len(r['failed'])}" if r["failed"] else ""))
+                lines.append(_account_push(c, "youtube", PUSH_BATCH))
             except playlists.ServiceError as e:
                 code = playlists.problem_code(c, e)
                 lines.append(f"{who}: {code}")
-                if not code.startswith("rate_limited"):
+                if _is_job_failure(code):
                     failures += 1
             except Exception as e:  # noqa: BLE001
                 failures += 1
@@ -249,14 +267,11 @@ def spotify_push() -> dict:
             c = _users(con, f"SELECT * FROM users WHERE id={int(acc['user_id'])}")[0]
             who = f"{c.user['username']}/spotify"
             try:
-                line, budget = _subscriptions_first(c, "spotify", SPOTIFY_BATCH)
-                r = playlists.push_batch(c, budget, "spotify")
-                lines.append(f"{who}: {line}{r['writes']} calls, {len(r['completed'])} playlists complete, {r['remaining']} items"
-                             f" still pending, {len(r['deleted'])} playlists deleted")
+                lines.append(_account_push(c, "spotify", SPOTIFY_BATCH))
             except playlists.ServiceError as e:
                 code = playlists.problem_code(c, e)
                 lines.append(f"{who}: {code}")
-                if not code.startswith("rate_limited"):
+                if _is_job_failure(code):
                     failures += 1
             except Exception as e:  # noqa: BLE001
                 failures += 1

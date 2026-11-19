@@ -241,6 +241,30 @@ def test_custom_addresses_and_the_daily_push(api, stash, fake):
     assert web.get("/api/subscriptions").json()["stats"]["youtube"]["pending"] == 0
 
 
+def test_subscription_updates_before_video_removals(api, stash, fake, monkeypatch):
+    """A pending subscribe uses the day's budget before a video removal. An addition still goes before both."""
+    from app import jobs
+
+    web = stash["web"]
+    connect(stash, "youtube")
+    web.post("/api/subscriptions/youtube/sync")
+    web.post("/api/playlists/accounts/youtube/sync")
+    pid = web.get("/api/playlists").json()["playlists"][0]["id"]
+    item = web.get(f"/api/playlists/lists/{pid}").json()["items"][0]
+    web.post(f"/api/playlists/lists/{pid}/edit", json={"ops": [{"op": "remove", "ids": [item["id"]]}]})
+    web.post("/api/subscriptions/youtube/edit", json={"ops": [{"op": "subscribe", "items": [
+        "https://www.youtube.com/c/delta"]}]})
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 1)
+    fake.calls.clear()
+    r = jobs.youtube_push()
+    assert r["ok"] and "1 subscription changes sent" in r["summary"], r
+    assert fake.calls.count("POST www.googleapis.com/youtube/v3/subscriptions") == 1
+    assert "DELETE www.googleapis.com/youtube/v3/playlistItems" not in fake.calls
+    r = jobs.youtube_push()
+    assert "1 writes" in r["summary"] and "0 items still pending" in r["summary"], r
+    assert fake.calls.count("DELETE www.googleapis.com/youtube/v3/playlistItems") == 1
+
+
 def test_spotify_artists_and_followed_playlists(api, stash, fake):
     web = stash["web"]
     connect(stash, "spotify")

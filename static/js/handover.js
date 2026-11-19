@@ -20,7 +20,7 @@ async function drawList(card) {
   const data = await api('GET', '/api/handovers');
   const row = (p) => h('li', { class: 'handover__item' },
     h('div', { class: 'handover__text' },
-      h('a', { href: `#/ai?project=${encodeURIComponent(p.name)}`, class: 'handover__title' }, p.name),
+      h('a', { href: `#/settings?section=ai&project=${encodeURIComponent(p.name)}`, class: 'handover__title' }, p.name),
       h('div', { class: 'muted small' },
         [t('Version {n}', { n: p.latest_version }), fmtDate(p.updated_at), who(p)].filter(Boolean).join(' · ')),
       p.title && h('div', { class: 'small' }, p.title)));
@@ -39,12 +39,12 @@ async function drawProject(card, project, version) {
   const current = version || latest;
   const item = current ? await api('GET', `/api/handovers/${encodeURIComponent(project)}/${current}`) : null;
   const link = (v) => h('a', {
-    href: `#/ai?project=${encodeURIComponent(project)}&version=${v.version}`,
+    href: `#/settings?section=ai&project=${encodeURIComponent(project)}&version=${v.version}`,
     class: v.version === current ? 'handover__version active' : 'handover__version',
   }, t('Version {n}', { n: v.version }), ' ', h('span', { class: 'muted small' }, fmtDate(v.created_at)));
 
   fill(card,
-    h('p', null, h('a', { href: '#/ai' }, `← ${t('Handovers')}`)),
+    h('p', null, h('a', { href: '#/settings?section=ai' }, `← ${t('Handovers')}`)),
     h('h2', null, data.project),
     h('div', { class: 'handover__versions' }, data.versions.map(link)),
     item && [

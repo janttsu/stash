@@ -53,6 +53,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import sys
 import time
 import urllib.error
@@ -80,33 +81,51 @@ class Stash:
         self.key = key
         self.n = 0
 
+    def _post(self, url: str, body: bytes, timeout: int, *, accept: str | None = None) -> bytes:
+        """POST and return the body. A silent stall is tried again.
+
+        On this host the Stash process gets swapped out. The first call after a quiet stretch then
+        sits until those pages are read back, sometimes past the read timeout, and Stash has sent
+        nothing yet. Python 3.14 raises TimeoutError for that. URLError does not cover it, so the
+        run used to die as a traceback on the first list of bookmarks. The next try finds Stash awake.
+        Nothing was changed: the server sent no response to retry over."""
+        headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json",
+                   "User-Agent": "stash-linkcheck"}
+        if accept:
+            headers["Accept"] = accept
+        last: Exception | None = None
+        for attempt in range(3):
+            req = urllib.request.Request(url, data=body, method="POST", headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    return r.read()
+            except urllib.error.HTTPError:
+                raise
+            except (TimeoutError, urllib.error.URLError, ConnectionError) as e:
+                last = e
+                if attempt == 2:
+                    break
+                print(f"Stash did not answer ({getattr(e, 'reason', None) or e}); trying again.", flush=True)
+                time.sleep(2)
+        sys.exit(f"Cannot reach Stash at {url}: {getattr(last, 'reason', None) or last}")
+
     def mark_checked(self, ids: list[int]) -> None:
         """Stores in Stash when these pages were checked, so a later run with --limit starts with the oldest."""
-        req = urllib.request.Request(self.url + "/api/v1/checked", data=json.dumps({"ids": ids}).encode(),
-                                     method="POST", headers={"Authorization": f"Bearer {self.key}",
-                                                             "Content-Type": "application/json",
-                                                             "User-Agent": "stash-linkcheck"})
         try:
-            with urllib.request.urlopen(req, timeout=60):
-                pass
-        except (urllib.error.HTTPError, urllib.error.URLError) as e:
+            self._post(self.url + "/api/v1/checked", json.dumps({"ids": ids}).encode(), 60)
+        except urllib.error.HTTPError as e:
             raise RuntimeError(f"not stored in Stash: {getattr(e, 'code', '') or e.reason}") from e
 
     def rpc(self, method: str, params: dict | None = None) -> dict:
         self.n += 1
         body = json.dumps({"jsonrpc": "2.0", "id": self.n, "method": method, "params": params or {}}).encode()
-        req = urllib.request.Request(self.endpoint, data=body, method="POST", headers={
-            "Authorization": f"Bearer {self.key}", "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream", "User-Agent": "stash-linkcheck"})
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                answer = json.loads(r.read())
+            raw = self._post(self.endpoint, body, 120, accept="application/json, text/event-stream")
         except urllib.error.HTTPError as e:
             if e.code == 401:
                 sys.exit("Stash did not accept the API key. Run --setup with a key from AI → Assistant (MCP).")
             sys.exit(f"Stash answered {e.code}: {e.read()[:300].decode(errors='replace')}")
-        except urllib.error.URLError as e:
-            sys.exit(f"Cannot reach Stash at {self.endpoint}: {e.reason}")
+        answer = json.loads(raw)
         if "error" in answer:
             raise RuntimeError(answer["error"].get("message", str(answer["error"])))
         return answer["result"]
@@ -120,6 +139,7 @@ class Stash:
 
     def bookmarks(self, filters: dict) -> tuple[list[dict], list[list]]:
         """The bookmarks (id, url, title, tags, where) and the tags in use with their counts."""
+        print("Asking Stash for the bookmarks…", flush=True)
         if filters:
             found = self.tool("search", label="stash-linkcheck", **filters)
             name = found.split(" ", 1)[0]
@@ -223,24 +243,81 @@ PAGE_JS = """(maxChars) => {
 }"""
 
 
+class PageStuck(Exception):
+    """A browser call did not come back. Closing the page would wait on that same call.
+
+    seen is set when the page was already read and only the closing stuck, so that page is not read twice.
+    """
+
+    def __init__(self, seen: dict | None = None):
+        self.seen = seen
+
+
+def _forget(task: asyncio.Task) -> None:
+    if not task.cancelled():
+        task.exception()
+
+
+async def within(awaitable, seconds: float):
+    """Wait for one browser call. Give up without asking Playwright to cancel it.
+
+    Playwright's cancel waits until Chromium answers an abort. A frame that never answers makes
+    that wait forever, so the timeout itself used to stick and the run never reached the summary.
+    The call is left running. Killing that Chromium is what lets it finish.
+    """
+    task = asyncio.create_task(awaitable)
+    done, _ = await asyncio.wait({task}, timeout=seconds)
+    if task in done:
+        return task.result()
+    task.add_done_callback(_forget)
+    raise PageStuck()
+
+
+def _cmdline(pid: int) -> str:
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            return fh.read().replace(b"\0", b" ").decode(errors="replace")
+    except OSError:
+        return ""
+
+
+def _chromium_pids() -> set[int]:
+    found = set()
+    for entry in os.listdir("/proc"):
+        if entry.isdigit() and "playwright_chromiumdev_profile" in _cmdline(int(entry)):
+            found.add(int(entry))
+    return found
+
+
+def _browser_gone(message: str) -> bool:
+    text = message.lower()
+    return "has been closed" in text or "target closed" in text or "connection closed" in text
+
+
 async def dismiss(page) -> list[str]:
-    """Click away cookie banners and age confirmations, in the page and its frames, a few rounds."""
+    """Click away a cookie banner or an age confirmation on the page itself.
+
+    Advertisement frames are not asked. One of them stopped answering, the ask has no limit, and
+    the whole run waited there. A banner inside such a frame stays up; the model then says it
+    cannot tell, and the bookmark is left as it is.
+    """
     clicked = []
     for _ in range(3):
-        hit = ""
-        for frame in page.frames:
-            try:
-                hit = await frame.evaluate(CLICK_JS, [sorted(CONSENT_WORDS), AGE_PATTERN, CONSENT_SELECTORS])
-            except Exception:  # noqa: BLE001  (frames come and go while the page loads)
-                continue
-            if hit:
-                break
+        try:
+            hit = await within(page.evaluate(
+                CLICK_JS, [sorted(CONSENT_WORDS), AGE_PATTERN, CONSENT_SELECTORS]), 4)
+        except PageStuck:
+            raise
+        except Exception:  # noqa: BLE001  (the page moved while the button was sought)
+            break
         if not hit:
             break
         clicked.append(hit)
-        await page.wait_for_timeout(1500)
+        await within(page.wait_for_timeout(800), 3)
         try:
-            await page.wait_for_load_state("networkidle", timeout=5000)
+            await within(page.wait_for_load_state("networkidle", timeout=3000), 5)
+        except PageStuck:
+            raise
         except Exception:  # noqa: BLE001
             pass
     return clicked
@@ -249,11 +326,14 @@ async def dismiss(page) -> list[str]:
 async def visit(context, url: str, timeout: int) -> dict:
     """What a person would see on the page: status, redirects, the final address, title and text."""
     seen = {"url": url}
-    page = await context.new_page()
+    page = None
     try:
-        response = await page.goto(url, wait_until="commit", timeout=timeout * 1000)
+        page = await within(context.new_page(), 15)
+        response = await within(page.goto(url, wait_until="commit", timeout=timeout * 1000), timeout + 5)
         try:
-            await page.wait_for_load_state("domcontentloaded", timeout=timeout * 1000)
+            await within(page.wait_for_load_state("domcontentloaded", timeout=timeout * 1000), timeout + 5)
+        except PageStuck:
+            raise
         except Exception:  # noqa: BLE001  (a slow page is read as far as it got)
             seen["slow"] = f"still loading after {timeout} s"
         if response is not None:
@@ -265,41 +345,72 @@ async def visit(context, url: str, timeout: int) -> dict:
             if chain:
                 seen["redirected_from"] = list(reversed(chain))[:5]
         try:
-            await page.wait_for_load_state("networkidle", timeout=6000)
+            await within(page.wait_for_load_state("networkidle", timeout=6000), 8)
+        except PageStuck:
+            raise
         except Exception:  # noqa: BLE001  (pages that never go quiet are read as they are)
             pass
         clicked = await dismiss(page)
         if clicked:
             seen["clicked"] = clicked
-        for _ in range(8):     # pages drawn by scripts: give them a moment to show some text
-            if await page.evaluate("document.body ? document.body.innerText.length : 0") > 200:
+        deadline = time.monotonic() + 8     # pages drawn by scripts: a moment to show some text
+        for _ in range(8):
+            if time.monotonic() >= deadline:
                 break
-            await page.wait_for_timeout(500)
+            length = await within(page.evaluate("document.body ? document.body.innerText.length : 0"), 4)
+            if length > 200:
+                break
+            await within(page.wait_for_timeout(500), 2)
         seen["final_url"] = page.url
-        seen.update(await page.evaluate(PAGE_JS, TEXT_CHARS))
+        seen.update(await within(page.evaluate(PAGE_JS, TEXT_CHARS), 8))
+    except PageStuck:
+        raise
     except Exception as e:  # noqa: BLE001
         message = str(e).strip().splitlines()[0][:200] if str(e).strip() else type(e).__name__
         seen["error"] = message
-        try:
-            seen["final_url"] = page.url
-        except Exception:  # noqa: BLE001
-            pass
+        if page is not None:
+            try:
+                seen["final_url"] = page.url
+            except Exception:  # noqa: BLE001
+                pass
     finally:
-        await page.close()
+        if page is not None:
+            try:
+                await within(page.close(), 5)
+            except PageStuck:
+                if "title" in seen or "error" in seen:
+                    raise PageStuck(seen)  # the reading stands; the browser itself is started again
+                raise
+            except Exception:  # noqa: BLE001
+                pass
     return seen
 
 
 async def launch(pw, args):
-    options = {"headless": not args.show_browser}
+    """The installed Chromium starts on this machine. Playwright's own browser is the fallback, and a browser
+    that never answers is reported instead of leaving the run sitting on the first line."""
+    # --no-zygote: without it Chromium never answers Playwright on this host, so the run sits
+    # on the first line forever
+    options = {"headless": not args.show_browser,
+               "args": ["--disable-dev-shm-usage", "--disable-gpu", "--no-sandbox", "--no-zygote"]}
     if args.chromium:
-        return await pw.chromium.launch(executable_path=args.chromium, **options)
-    try:
-        return await pw.chromium.launch(**options)
-    except Exception as e:  # noqa: BLE001  (Playwright's own Chromium is not downloaded: use the system's)
+        candidates = [args.chromium]
+    else:
         system = shutil.which("chromium") or shutil.which("google-chrome-stable") or shutil.which("chromium-browser")
-        if not system:
-            sys.exit(f"No browser: install chromium, or run: python -m playwright install chromium\n({e})")
-        return await pw.chromium.launch(executable_path=system, **options)
+        candidates = ([system] if system else []) + [None]
+    errors = []
+    for exe in candidates:
+        opts = dict(options)
+        if exe:
+            opts["executable_path"] = exe
+        label = exe or "Playwright's Chromium"
+        print(f"Opening the browser ({label})…", flush=True)
+        try:
+            return await asyncio.wait_for(pw.chromium.launch(**opts), timeout=60)
+        except Exception as e:  # noqa: BLE001  (a missing browser, or one that does not answer)
+            errors.append(f"{label}: {type(e).__name__}: {e}")
+    sys.exit("The browser did not start:\n" + "\n".join(errors)
+             + "\nInstall chromium, or run: python -m playwright install chromium")
 
 
 # --- the model --------------------------------------------------------------------
@@ -450,6 +561,82 @@ def save_report(path: Path, checked: dict) -> None:
     tmp.replace(path)
 
 
+class Browser:
+    """The one Chromium the pages share. A page that stops answering is killed and the browser started again."""
+
+    def __init__(self, pw, args):
+        self.pw = pw
+        self.args = args
+        self.browser = None
+        self.context = None
+        self.profile = ""
+        self.gen = 0
+        self.lock = asyncio.Lock()
+
+    async def open(self) -> None:
+        before = _chromium_pids()
+        self.browser = await launch(self.pw, self.args)
+        await self._context()
+        self.profile = await self._remember(before)
+        self.gen += 1
+
+    async def _context(self) -> None:
+        self.context = await self.browser.new_context(
+            user_agent=USER_AGENT, locale=self.args.locale, viewport={"width": 1280, "height": 900})
+        if not self.args.show_browser:   # pictures, video and fonts are not needed to read a page
+            await self.context.route("**/*", lambda route: route.abort()
+                                     if route.request.resource_type in ("image", "media", "font") else route.continue_())
+
+    @staticmethod
+    def _profile_of(pids: set[int]) -> str:
+        for pid in pids:
+            found = re.search(r"--user-data-dir=(\S+)", _cmdline(pid))
+            if found:
+                return found.group(1)
+        return ""
+
+    async def _remember(self, before: set[int]) -> str:
+        for _ in range(10):
+            profile = self._profile_of(_chromium_pids() - before)
+            if profile:
+                return profile
+            await asyncio.sleep(0.1)
+        return ""
+
+    def kill(self) -> None:
+        if not self.profile:
+            return
+        for pid in _chromium_pids():
+            if self.profile in _cmdline(pid):
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+
+    async def restart(self, seen: int) -> None:
+        async with self.lock:
+            if self.gen != seen:
+                return
+            self.kill()
+            await asyncio.sleep(0.3)
+            before = _chromium_pids()
+            self.browser = await launch(self.pw, self.args)
+            await self._context()
+            self.profile = await self._remember(before)
+            self.gen += 1
+
+    async def finish(self) -> None:
+        if self.browser is None:
+            return
+        task = asyncio.create_task(self.browser.close())
+        done, _ = await asyncio.wait({task}, timeout=15)
+        if task not in done:
+            self.kill()
+            task.add_done_callback(_forget)
+            return
+        task.result()
+
+
 async def check_all(args, todo: list[dict], checked: dict, report: Path, vocabulary: list, stash: Stash) -> None:
     from playwright.async_api import async_playwright
 
@@ -462,21 +649,44 @@ async def check_all(args, todo: list[dict], checked: dict, report: Path, vocabul
     warned = False
 
     async with async_playwright() as pw:
-        browser = await launch(pw, args)
-        context = await browser.new_context(user_agent=USER_AGENT, locale=args.locale,
-                                            viewport={"width": 1280, "height": 900})
-        if not args.show_browser:   # pictures, video and fonts are not needed to read a page
-            await context.route("**/*", lambda route: route.abort()
-                                if route.request.resource_type in ("image", "media", "font") else route.continue_())
+        browser = Browser(pw, args)
+        await browser.open()
 
         async def worker():
             nonlocal done, warned
-            while not queue.empty():
-                b = queue.get_nowait()
-                seen = await visit(context, b["url"], args.timeout)
-                if "error" in seen and "Timeout" in seen["error"]:
-                    seen = await visit(context, b["url"], args.timeout * 2)   # one more, slower try
+            while True:
+                try:
+                    b = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    # empty() is not a promise: several pages are open at once, and the one that loses the
+                    # race for the last address must stop. Raising here used to end the run at 99/100,
+                    # before the tags were written to Stash.
+                    return
+                print(f"Reading {b['url'][:80]}", flush=True)
+                seen = None
+                for attempt in range(2):
+                    gen = browser.gen
+                    try:
+                        seen = await visit(browser.context, b["url"], args.timeout)
+                    except PageStuck as stuck:
+                        print(f"The browser stopped answering on {b['url'][:70]}; starting it again.",
+                              flush=True)
+                        await browser.restart(gen)
+                        if stuck.seen is not None:
+                            seen = stuck.seen
+                            break
+                        seen = None
+                        continue
+                    if seen and attempt == 0 and "error" in seen and (
+                            "Timeout" in seen["error"] or _browser_gone(seen["error"])):
+                        if _browser_gone(seen["error"]):
+                            await browser.restart(gen)
+                        continue   # one more try, with the same limit
+                    break
+                if seen is None:
+                    seen = {"url": b["url"], "error": "the browser stopped answering"}
                 async with model:
+                    print(f"Asking the model about #{b['id']}", flush=True)
                     verdict = await asyncio.to_thread(judge, args, b, seen, vocabulary)
                 checked[b["url"]] = {"id": b["id"], "title": b.get("title", ""), **verdict,
                                      "status": seen.get("status"), "final_url": seen.get("final_url", ""),
@@ -495,7 +705,7 @@ async def check_all(args, todo: list[dict], checked: dict, report: Path, vocabul
                       flush=True)
 
         await asyncio.gather(*(worker() for _ in range(max(1, args.pages))))
-        await browser.close()
+        await browser.finish()
 
 
 def tag_changes(bookmarks: list[dict], checked: dict) -> dict[int, tuple[list[str], list[str], list[str]]]:

@@ -7,4 +7,4 @@ Description=Stash: push pending playlist changes to YouTube
 Type=oneshot
 WorkingDirectory=%h/stash
 Environment=PATH=%h/stash/.venv/bin:/usr/bin:/bin
-ExecStart=%h/stash/.venv/bin/python -m app.cli job youtube-push
+ExecStart=%h/stash/scripts/youtube-push-daily.sh

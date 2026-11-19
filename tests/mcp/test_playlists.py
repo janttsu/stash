@@ -420,8 +420,8 @@ def test_publish_in_daily_batches_within_quota(api, stash, fake, monkeypatch):
     con.close()
 
 
-def test_daily_batch_is_shared_between_playlists(api, stash, fake, monkeypatch):
-    """Every pending playlist moves in each run: the first one by name does not take the whole budget."""
+def test_daily_batch_stays_on_the_first_playlist(api, stash, fake, monkeypatch):
+    """The playlist first in line keeps the day's writes until its additions are done; the next one waits."""
     from app import jobs
 
     web = stash["web"]
@@ -437,15 +437,42 @@ def test_daily_batch_is_shared_between_playlists(api, stash, fake, monkeypatch):
     monkeypatch.setattr(jobs, "PUSH_BATCH", 4)
     r = jobs.youtube_push()
     assert r["ok"] and "4 writes" in r["summary"] and "4 items still pending" in r["summary"], r
-    assert videos("Aaa") == ["vidvidvid10", "vidvidvid11"] and videos("Bbb") == ["vidvidvid20", "vidvidvid21"], "two each"
-    monkeypatch.setattr(jobs, "PUSH_BATCH", 3)
+    lengths = sorted(len(videos(name)) for name in ("Aaa", "Bbb"))
+    assert lengths == [0, 4], {name: videos(name) for name in ("Aaa", "Bbb")}
     r = jobs.youtube_push()
-    assert "3 writes" in r["summary"] and "1 items still pending" in r["summary"], r
-    assert len(videos("Aaa")) + len(videos("Bbb")) == 7
-    monkeypatch.setattr(jobs, "PUSH_BATCH", 10)
-    r = jobs.youtube_push()
-    assert "1 writes" in r["summary"] and "0 items still pending" in r["summary"], "the rest of the budget is not wasted or spun"
+    assert "4 writes" in r["summary"] and "0 items still pending" in r["summary"], r
     assert videos("Aaa") == [f"vidvidvid{n}" for n in range(10, 14)] and videos("Bbb") == [f"vidvidvid{n}" for n in range(20, 24)]
+
+
+def test_additions_before_removals_across_playlists(api, stash, fake, monkeypatch):
+    """A removal on one playlist waits until every playlist's additions have been sent."""
+    from app import jobs
+
+    web = stash["web"]
+    connect(stash, "youtube")
+    web.post("/api/playlists/accounts/youtube/sync")
+    by_name = lambda: {p["name"]: p for p in web.get("/api/playlists").json()["playlists"]}  # noqa: E731
+    videos = lambda pl: [v for _, v in fake.youtube[pl]["items"]]  # noqa: E731
+    live = by_name()["Live"]
+    gone = web.get(f"/api/playlists/lists/{live['id']}").json()["items"][0]
+    web.post(f"/api/playlists/lists/{live['id']}/edit", json={"ops": [
+        {"op": "remove", "ids": [gone["id"]]},
+        {"op": "add", "items": ["https://youtu.be/vidvidvid09"]}]})
+    csv = "Video ID,Playlist Video Creation Timestamp\nvidvidvid10,2026-01-01T00:00:00+00:00\n"
+    web.post("/api/playlists/takeout", json={"files": [{"name": "Extra-videos.csv", "text": csv}]})
+    assert web.post(f"/api/playlists/lists/{by_name()['Extra']['id']}/publish").json()["pending"] == 1
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 2)
+    r = jobs.youtube_push()
+    assert r["ok"] and "2 writes" in r["summary"] and "1 items still pending" in r["summary"], r
+    writes = [x for x in fake.calls if x.split()[0] in ("DELETE", "POST", "PUT") and "playlistItems" in x]
+    assert writes.count("POST www.googleapis.com/youtube/v3/playlistItems") == 2
+    assert "DELETE www.googleapis.com/youtube/v3/playlistItems" not in writes
+    assert "vidvidvid01" in videos("PL1"), "the removal waits"
+    assert "vidvidvid09" in videos("PL1") and videos("PL2") == ["vidvidvid10"]
+    monkeypatch.setattr(jobs, "PUSH_BATCH", 1)
+    r = jobs.youtube_push()
+    assert "1 writes" in r["summary"] and "0 items still pending" in r["summary"], r
+    assert "vidvidvid01" not in videos("PL1")
 
 
 def test_publish_to_spotify_in_batches(api, stash, fake, monkeypatch):

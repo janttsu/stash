@@ -38,7 +38,7 @@ export async function renderAuth(container, onDone) {
       type: 'text', class: 'input', inputMode: 'numeric', autocomplete: 'one-time-code', maxLength: 10, placeholder: '123456',
     });
     const remember = h('input', { type: 'checkbox' });
-    const rememberField = h('label', { class: 'check' }, remember, h('span', null, t('Remember this browser for 30 days')));
+    const rememberField = h('label', { class: 'check' }, remember, h('span', null, t('Remember this browser for 60 days')));
     const totpField = h('label', { class: 'field', hidden: true }, h('span', null, t('Code from your authenticator app')), totp);
     const error = h('p', { class: 'form-error', hidden: true });
     const info = h('p', { class: 'muted center', hidden: !notice }, notice);
